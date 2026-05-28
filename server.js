@@ -7,7 +7,7 @@ import dotenv from 'dotenv';
 import { runScan, runResearch } from './agent.js';
 import { OAuth2Client } from 'google-auth-library';
 import admin from 'firebase-admin';
-import functions from 'firebase-functions';
+import * as functions from 'firebase-functions';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 
 // Load environmental variables

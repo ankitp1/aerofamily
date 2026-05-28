@@ -39,6 +39,25 @@ const PREMIUM_CARDS = {
   }
 };
 
+const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function formatDateRange(outbound, returnD) {
+  if (!outbound || !returnD) return '';
+  
+  const parseDate = (dStr) => {
+    const parts = dStr.split('-');
+    if (parts.length !== 3) return null;
+    const month = months[parseInt(parts[1], 10) - 1];
+    const day = parseInt(parts[2], 10);
+    return { month, day };
+  };
+  
+  const outPart = parseDate(outbound);
+  const retPart = parseDate(returnD);
+  
+  if (!outPart || !retPart) return '';
+  return `${outPart.month} ${outPart.day} – ${retPart.month} ${retPart.day}`;
+}
+
 const BACKEND_URL = 'http://localhost:3001';
 
 // Custom lightweight Markdown renderer to keep React zero-dependency
@@ -180,6 +199,8 @@ export default function App() {
   const [scanning, setScanning] = useState(false);
   const [scanConsoleLogs, setScanConsoleLogs] = useState([]);
   const [newAirportCode, setNewAirportCode] = useState('');
+  const [selectedDeal, setSelectedDeal] = useState(null);
+  const [hoveredAirport, setHoveredAirport] = useState(null);
   
   // Custom mock email input state for Simulated Dev Login
   const [devEmail, setDevEmail] = useState('');
@@ -598,62 +619,51 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen pb-12">
+    <div className="min-h-screen pb-28 bg-[#080a0f]">
       {/* HEADER SECTION */}
-      <header className="glass-panel sticky top-0 z-50 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-indigo-600/40">✈️</div>
+      <header className="sticky top-0 z-50 px-6 py-4 flex items-center justify-between bg-[#080a0f] border-b border-[#121620]/60">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-[#5f5af6] flex items-center justify-center text-white shadow shadow-[#5f5af6]/30">
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L14 19v-5.5l8 2.5z"/>
+            </svg>
+          </div>
           <div>
-            <h1 className="text-xl font-extrabold font-heading tracking-tight gradient-text">AeroFamily</h1>
-            <p className="text-[10px] uppercase font-bold tracking-widest text-indigo-400">Agentic Deal Finder</p>
+            <h1 className="text-base font-extrabold font-heading tracking-tight text-white leading-tight">AeroFamily</h1>
           </div>
         </div>
 
-        {/* Navigation Tabs */}
-        <nav className="nav-tabs w-full max-w-lg">
-          <button onClick={() => setActiveTab('deals')} className={`tab-btn ${activeTab === 'deals' ? 'active' : ''}`}>
-            🏷️ Flight Deals
-          </button>
-          <button onClick={() => setActiveTab('wallet')} className={`tab-btn ${activeTab === 'wallet' ? 'active' : ''}`}>
-            💳 Card Wallet
-          </button>
-          <button onClick={() => setActiveTab('itinerary')} className={`tab-btn ${activeTab === 'itinerary' ? 'active' : ''}`}>
-            🗺️ Trip Planner
-          </button>
-          <button onClick={() => setActiveTab('agent')} className={`tab-btn ${activeTab === 'agent' ? 'active' : ''}`}>
-            🤖 Agent Terminal
-          </button>
-        </nav>
-
         {/* User profile & Log Out */}
-        {isLoggedIn && user ? (
-          <div className="flex items-center gap-3 bg-slate-900/80 border border-slate-800/80 rounded-full pl-2.5 pr-4 py-1.5 text-xs">
-            <img 
-              src={user.picture} 
-              alt={user.name} 
-              className="w-7 h-7 rounded-full border border-indigo-500/30 object-cover shadow shadow-indigo-500/20"
-            />
-            <div className="text-left hidden md:block">
-              <div className="font-bold text-slate-200 leading-tight">{user.name}</div>
-              <div className="text-[9px] text-indigo-400 leading-none">{user.email}</div>
+        <div className="flex items-center gap-6 text-xs text-[#94a3b8]">
+          <div className="hidden sm:flex items-center gap-2 font-semibold">
+            <span>Family of {profile.familyProfile.adults + profile.familyProfile.kids}</span>
+            <span className="text-slate-800">•</span>
+            <span>${profile.familyProfile.budget.toLocaleString()} budget</span>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#10b981]"></span>
+            <span className="text-[#94a3b8] font-semibold tracking-wide">Daemon armed</span>
+          </div>
+
+          {isLoggedIn && user && (
+            <div className="flex items-center gap-2 bg-[#0e111a] border border-slate-800 rounded-full pl-1.5 pr-3 py-1 text-xs">
+              <img 
+                src={user.picture} 
+                alt={user.name} 
+                className="w-6 h-6 rounded-full border border-indigo-500/20 object-cover"
+              />
+              <span className="font-semibold text-slate-200 hidden md:inline">{user.name.split(' ')[0]}</span>
+              <button 
+                onClick={handleLogout}
+                className="text-slate-400 hover:text-rose-400 transition-colors font-extrabold ml-1 px-1 text-xs cursor-pointer bg-transparent border-none outline-none"
+                title="Log Out"
+              >
+                🚪
+              </button>
             </div>
-            <button 
-              onClick={handleLogout}
-              className="text-slate-400 hover:text-rose-400 transition-colors font-extrabold ml-1 px-1 text-sm cursor-pointer bg-transparent border-none outline-none"
-              title="Log Out"
-            >
-              🚪
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2 bg-slate-900/80 border border-slate-800 px-3 py-1.5 rounded-full text-xs font-semibold">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-            </span>
-            <span className="text-slate-300">Scanner Daemon Armed</span>
-          </div>
-        )}
+          )}
+        </div>
       </header>
 
       {/* MAIN CONTAINER */}
@@ -661,121 +671,320 @@ export default function App() {
 
         {/* TAB 1: FLIGHT DEALS */}
         {activeTab === 'deals' && (
-          <section className="space-y-6">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-              <div>
-                <h2 className="text-2xl font-extrabold font-heading">🔥 Top Active Flight Deals</h2>
-                <p className="text-sm text-slate-400">Scouted departures from: {profile.airports.map(a => a.code).join(', ')}</p>
+          <section className="space-y-8 animate-in fade-in duration-300">
+            
+            {/* Redesigned Upper Dashboard Row */}
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+              
+              {/* Left Panel: SINCE YOUR LAST VISIT */}
+              <div className="lg:col-span-2 bg-[#0c0f16]/90 border border-[#121620]/60 rounded-2xl p-6 flex flex-col justify-between shadow-xl backdrop-blur-md">
+                <div>
+                  <div className="text-[10px] text-slate-500 font-extrabold uppercase tracking-widest">
+                    SINCE YOUR LAST VISIT
+                  </div>
+                  
+                  {/* Large Stat */}
+                  <div className="flex items-baseline gap-3 mt-4">
+                    <span className="text-white text-8xl font-black font-heading leading-none">3</span>
+                    <div className="flex flex-col">
+                      <span className="text-emerald-400 font-extrabold text-sm uppercase tracking-wider leading-none">new</span>
+                      <span className="text-emerald-400 font-extrabold text-sm uppercase tracking-wider leading-none mt-1">deals</span>
+                    </div>
+                  </div>
+                  
+                  {/* Dynamic description paragraph */}
+                  <p className="text-slate-400 text-sm mt-6 leading-relaxed pretty-paragraph">
+                    The agent scanned <strong className="text-slate-200">15 routes</strong> from {profile.airports[0]?.code || 'ATL'} 2 hours ago. {deals.length || 6} deals are live — one expires within 48 hours.
+                  </p>
+                </div>
+                
+                <div>
+                  <hr className="border-slate-900 my-6" />
+                  
+                  {/* Stats Grid */}
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">ACTIVE</div>
+                      <div className="text-white text-2xl font-black font-heading mt-1">{deals.length || 6}</div>
+                    </div>
+                    <div>
+                      <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">BEST SAVE</div>
+                      <div className="text-emerald-400 text-2xl font-black font-heading mt-1">
+                        {deals.length > 0 ? Math.max(...deals.map(d => d.savingsPercent)) : 56}%
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">NEXT SCAN</div>
+                      <div className="text-white text-2xl font-black font-heading mt-1">8:00 PM</div>
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={triggerScan}
+                    disabled={scanning}
+                    className="btn btn-primary w-full mt-6 text-xs py-2 shadow-lg shadow-indigo-600/20"
+                  >
+                    {scanning ? '🔄 SCANNING DAEMON...' : '🔎 SCAN FOR FARE DROPS'}
+                  </button>
+                </div>
               </div>
-              <button 
-                onClick={triggerScan} 
-                disabled={scanning} 
-                className="btn btn-primary"
-              >
-                {scanning ? '🔄 Scanning...' : '🔎 Scan for Drops Now'}
-              </button>
+
+              {/* Right Panel: FLIGHT ROUTE VISUALIZATION MAP */}
+              <div className="lg:col-span-3 bg-[#0c0f16]/90 border border-[#121620]/60 rounded-2xl p-6 shadow-xl backdrop-blur-md flex flex-col justify-between min-h-[340px] relative overflow-hidden">
+                <div className="flex justify-between items-center z-10">
+                  <div className="text-[10px] text-slate-500 font-extrabold uppercase tracking-widest flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-ping inline-block"></span>
+                    {deals.length || 6} LIVE ROUTES FROM {profile.airports[0]?.code || 'ATL'}
+                  </div>
+                  <span className="text-[9px] font-mono text-indigo-400 bg-indigo-950/30 px-2 py-0.5 rounded border border-indigo-900/30">
+                    interactive radar
+                  </span>
+                </div>
+
+                {/* SVG Flight Map Container */}
+                <div className="flex-1 w-full min-h-[260px] mt-4 relative">
+                  <svg 
+                    viewBox="0 0 720 300" 
+                    className="w-full h-full select-none"
+                    style={{ background: 'transparent' }}
+                  >
+                    <defs>
+                      <pattern id="flight-grid" width="30" height="30" patternUnits="userSpaceOnUse">
+                        <circle cx="2" cy="2" r="1" fill="rgba(255, 255, 255, 0.04)" />
+                      </pattern>
+                      <radialGradient id="halo-glow" cx="50%" cy="50%" r="50%">
+                        <stop offset="0%" stopColor="#4f46e5" stopOpacity="0.25" />
+                        <stop offset="100%" stopColor="#4f46e5" stopOpacity="0" />
+                      </radialGradient>
+                      <radialGradient id="yellow-glow" cx="50%" cy="50%" r="50%">
+                        <stop offset="0%" stopColor="#fbbf24" stopOpacity="0.35" />
+                        <stop offset="100%" stopColor="#fbbf24" stopOpacity="0" />
+                      </radialGradient>
+                    </defs>
+
+                    {/* Grid Background */}
+                    <rect width="100%" height="100%" fill="url(#flight-grid)" />
+
+                    {/* Central Glow under ATL */}
+                    <circle cx="360" cy="150" r="70" fill="url(#halo-glow)" />
+
+                    {/* Surrounding Nodes Bezier Curves */}
+                    {[
+                      { code: 'PHX', x: 230, y: 90, cx: 295, cy: 105 },
+                      { code: 'KOA', x: 120, y: 190, cx: 230, cy: 155 },
+                      { code: 'MDE', x: 380, y: 260, cx: 370, cy: 215 },
+                      { code: 'SJU', x: 540, y: 220, cx: 480, cy: 200, isBest: true },
+                      { code: 'NAS', x: 560, y: 120, cx: 485, cy: 125 },
+                      { code: 'PUJ', x: 670, y: 110, cx: 535, cy: 115 }
+                    ].map(node => {
+                      const isActive = hoveredAirport === node.code || (!hoveredAirport && node.isBest);
+                      return (
+                        <g key={`path-group-${node.code}`}>
+                          {/* Shadow glow line for active curve */}
+                          {isActive && (
+                            <path
+                              d={`M 360 150 Q ${node.cx} ${node.cy} ${node.x} ${node.y}`}
+                              fill="none"
+                              stroke={node.isBest ? '#fbbf24' : '#6366f1'}
+                              strokeWidth="4"
+                              opacity="0.15"
+                              className="transition-all duration-300"
+                            />
+                          )}
+                          {/* Standard Curve Line */}
+                          <path
+                            d={`M 360 150 Q ${node.cx} ${node.cy} ${node.x} ${node.y}`}
+                            fill="none"
+                            stroke={isActive ? (node.isBest ? '#fbbf24' : '#818cf8') : 'rgba(99, 102, 241, 0.15)'}
+                            strokeWidth={isActive ? '2' : '1.2'}
+                            strokeDasharray={isActive ? 'none' : '3 4'}
+                            className="transition-all duration-300"
+                          />
+                        </g>
+                      );
+                    })}
+
+                    {/* Central Origin Node (ATL) */}
+                    <g>
+                      <circle cx="360" cy="150" r="16" fill="rgba(255, 255, 255, 0.05)" />
+                      <circle cx="360" cy="150" r="6" fill="#080a0f" stroke="white" strokeWidth="2" />
+                      <text x="360" y="132" fill="white" fontSize="10" fontWeight="800" textAnchor="middle" fontFamily="Outfit">
+                        {profile.airports[0]?.code || 'ATL'}
+                      </text>
+                    </g>
+
+                    {/* Destination Nodes */}
+                    {[
+                      { code: 'PHX', x: 230, y: 90, price: '$229' },
+                      { code: 'KOA', x: 120, y: 190, price: '$458' },
+                      { code: 'MDE', x: 380, y: 260, price: '$289' },
+                      { code: 'SJU', x: 540, y: 220, price: '$222', isBest: true },
+                      { code: 'NAS', x: 560, y: 120, price: '$298' },
+                      { code: 'PUJ', x: 670, y: 110, price: '$347' }
+                    ].map(node => {
+                      const isActive = hoveredAirport === node.code || (!hoveredAirport && node.isBest);
+                      const displayColor = node.isBest ? '#fbbf24' : '#6366f1';
+                      
+                      return (
+                        <g 
+                          key={`node-${node.code}`}
+                          onMouseEnter={() => setHoveredAirport(node.code)}
+                          onMouseLeave={() => setHoveredAirport(null)}
+                          onClick={() => {
+                            const match = deals.find(d => d.destinationAirport === node.code);
+                            if (match) setSelectedDeal(match);
+                          }}
+                          className="cursor-pointer"
+                        >
+                          {/* Glow background behind SJU/active nodes */}
+                          {isActive && (
+                            <circle cx={node.x} cy={node.y} r="16" fill={node.isBest ? 'url(#yellow-glow)' : 'rgba(99, 102, 241, 0.15)'} />
+                          )}
+                          {/* Pulsing ring */}
+                          {isActive && (
+                            <circle 
+                              cx={node.x} 
+                              cy={node.y} 
+                              r="12" 
+                              fill="none" 
+                              stroke={displayColor} 
+                              strokeWidth="1.5" 
+                              opacity="0.6" 
+                              className="animate-ping"
+                            />
+                          )}
+                          {/* Inner circle */}
+                          <circle 
+                            cx={node.x} 
+                            cy={node.y} 
+                            r={isActive ? "5" : "4"} 
+                            fill={isActive ? displayColor : "#161b26"} 
+                            stroke={isActive ? "white" : "rgba(148, 163, 184, 0.4)"} 
+                            strokeWidth="1.5" 
+                            className="transition-all duration-300"
+                          />
+                          {/* Muted Airport Code above */}
+                          <text 
+                            x={node.x} 
+                            y={node.y - 12} 
+                            fill="#64748b" 
+                            fontSize="9" 
+                            fontWeight="bold" 
+                            textAnchor="middle" 
+                            fontFamily="Inter"
+                          >
+                            {node.code}
+                          </text>
+                          {/* Price Tag below */}
+                          <text 
+                            x={node.x} 
+                            y={node.y + 18} 
+                            fill={isActive ? displayColor : '#94a3b8'} 
+                            fontSize="10" 
+                            fontWeight="800" 
+                            textAnchor="middle" 
+                            fontFamily="Outfit"
+                          >
+                            {node.price}
+                          </text>
+                        </g>
+                      );
+                    })}
+                  </svg>
+                </div>
+              </div>
+
             </div>
 
-            {deals.length === 0 ? (
-              <div className="glass-card p-12 text-center space-y-4">
-                <div className="text-4xl">📭</div>
-                <h3 className="text-xl font-bold font-heading">No Deals Found</h3>
-                <p className="text-slate-400 max-w-md mx-auto">The flight deal index is empty. Hit the scan button above to deploy our AI scouts to search the web for deals!</p>
+            {/* Redesigned Bottom Row: LIVE DEALS HORIZONTAL LIST */}
+            <div className="space-y-4 pt-4">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2.5">
+                  <svg className="w-4.5 h-4.5 text-[#5f5af6] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  <span className="text-white text-base font-extrabold font-heading tracking-tight">
+                    Live deals
+                  </span>
+                </div>
+                <button 
+                  onClick={() => setActiveTab('deals')}
+                  className="text-xs font-semibold text-[#5f5af6] hover:text-[#7f7bf8] transition-colors flex items-center gap-1 cursor-pointer bg-transparent border-none"
+                >
+                  Browse all <span className="text-sm">➔</span>
+                </button>
               </div>
-            ) : (
-              <div className="grid-cols-deals">
-                {deals.map(deal => {
-                  const cardBenefits = calculateCardBenefits(deal.dealPrice);
-                  const bestCard = cardBenefits[0];
-                  const familyCount = profile.familyProfile.adults + profile.familyProfile.kids;
-                  const totalFlightCost = deal.dealPrice * familyCount;
 
-                  return (
-                    <article key={deal.id} className="glass-card deal-card p-5 space-y-4">
-                      {/* Deal Header */}
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-heading font-extrabold text-2xl tracking-tight text-white">${deal.dealPrice}</span>
-                            <span className="badge badge-success text-[10px]">{deal.savingsPercent}% OFF</span>
-                            {deal.verified && (
-                              <span className="badge text-[10px] bg-emerald-950/40 text-emerald-400 border border-emerald-500/30 font-extrabold animate-pulse">
-                                ✓ Verified Live
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-xs text-slate-500 font-medium">Normally ~${deal.normalPrice}</span>
-                        </div>
-                        <div className="text-right">
-                          <span className="badge badge-accent text-[10px] font-bold">{deal.departureAirport} ➔ {deal.destinationAirport}</span>
-                          <div className="text-[10px] text-slate-500 mt-1 font-semibold">{deal.airlines}</div>
-                        </div>
-                      </div>
-
-                      {/* Destination Details */}
-                      <div>
-                        <h3 className="text-lg font-bold font-heading text-white">{deal.destination}</h3>
-                        <p className="text-xs text-slate-400 mt-1 leading-relaxed line-clamp-3">{deal.description}</p>
-                      </div>
-
-                      {/* Travel details */}
-                      <div className="bg-slate-900/60 border border-slate-800/80 rounded-lg p-2.5 flex items-center justify-between text-xs text-slate-300">
-                        <div>📅 {deal.outboundDate} to {deal.returnDate}</div>
-                        <div className="text-[10px] uppercase font-bold text-amber-500">⚡ Expires: {deal.bookingWindow}</div>
-                      </div>
-
-                      {deal.longLayoverWarning && (
-                        <div className="bg-rose-500/5 border border-rose-500/20 rounded-lg p-2.5 flex items-center gap-2 text-xs font-bold text-rose-400/90 tracking-wide">
-                          <span className="relative flex h-2 w-2">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
+              {deals.length === 0 ? (
+                <div className="glass-card p-12 text-center space-y-4">
+                  <div className="text-4xl">📭</div>
+                  <h3 className="text-xl font-bold font-heading">No Deals Found</h3>
+                  <p className="text-slate-400 max-w-sm mx-auto">Click "Scan for Fare Drops" above to populate the interactive map and live deal cards.</p>
+                </div>
+              ) : (
+                <div className="flex gap-4 overflow-x-auto pb-4 pt-1 scrollbar-none snap-x snap-mandatory">
+                  {deals.map(deal => {
+                    const isSJU = deal.destinationAirport === 'SJU';
+                    const isMDE = deal.destinationAirport === 'MDE';
+                    const isNAS = deal.destinationAirport === 'NAS';
+                    const isNew = isSJU || isMDE || isNAS;
+                    
+                    return (
+                      <div
+                        key={deal.id}
+                        onClick={() => setSelectedDeal(deal)}
+                        onMouseEnter={() => setHoveredAirport(deal.destinationAirport)}
+                        onMouseLeave={() => setHoveredAirport(null)}
+                        className={`bg-[#0e111a] border border-[#1b1f2e] rounded-2xl p-5 w-[205px] shrink-0 snap-start cursor-pointer transition-all flex flex-col justify-between h-48 relative overflow-hidden ${
+                          hoveredAirport === deal.destinationAirport || (!hoveredAirport && deal.destinationAirport === 'SJU')
+                            ? 'border-indigo-500/40 shadow-[0_8px_32px_rgba(99,102,241,0.08)] scale-[1.02]' 
+                            : ''
+                        }`}
+                      >
+                        {/* Top Row: Code and Badge */}
+                        <div className="flex justify-between items-center">
+                          <span className="text-[10px] font-bold text-slate-500 tracking-wider">
+                            {deal.destinationAirport}
                           </span>
-                          <span>{deal.longLayoverWarning}</span>
+                          {isNew ? (
+                            <span className="text-[8px] uppercase font-bold tracking-wider text-[#10b981] bg-[#10b981]/10 px-1.5 py-0.5 rounded">
+                              NEW
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold text-slate-500">
+                              {deal.savingsPercent}%
+                            </span>
+                          )}
                         </div>
-                      )}
 
-                      {/* Payment Benefit Recommender */}
-                      <div className="border-t border-slate-800/80 pt-3.5 space-y-2">
-                        <div className="text-[10px] uppercase font-bold text-indigo-400 tracking-wider">💳 Wallet Payment Optimizer</div>
-                        {bestCard ? (
-                          <div className="bg-indigo-950/20 border border-indigo-500/20 rounded-lg p-2.5 flex items-center justify-between gap-2">
-                            <div>
-                              <div className="text-xs font-bold text-indigo-300">💳 Best Card: {bestCard.cardName}</div>
-                              <p className="text-[10px] text-slate-400 mt-0.5">{bestCard.idealFor}</p>
-                            </div>
-                            <div className="text-right">
-                              <span className="text-xs font-extrabold text-emerald-400">+{bestCard.points.toLocaleString()} pts</span>
-                              <div className="text-[9px] text-slate-400 mt-0.5">Worth ~${bestCard.savings}</div>
-                            </div>
-                          </div>
-                        ) : (
-                          <p className="text-[10px] text-slate-500">Add cards in the Wallet tab to calculate point rewards for this flight.</p>
-                        )}
-                        <div className="text-[9px] text-slate-500">Calculated for family of {familyCount}: total ticket purchase cost is ${totalFlightCost.toLocaleString()}</div>
-                      </div>
+                        {/* Middle Row: Destination */}
+                        <div className="mt-3">
+                          <h4 className="text-white text-sm font-extrabold font-heading line-clamp-1">
+                            {deal.destination.split(',')[0]}
+                          </h4>
+                          <p className="text-[10px] text-slate-500 font-medium leading-none mt-1">
+                            {deal.destination.split(',')[1]?.trim() || ''}
+                          </p>
+                        </div>
 
-                      {/* Booking Action Buttons */}
-                      <div className="flex gap-2.5 pt-2">
-                        <a 
-                          href={deal.bookingLink} 
-                          target="_blank" 
-                          rel="noreferrer" 
-                          className="btn btn-primary flex-1 text-center py-2 text-xs"
-                        >
-                          Book Flight 🛫
-                        </a>
-                        <button 
-                          onClick={() => researchTrip(deal)} 
-                          className="btn btn-secondary py-2 text-xs"
-                        >
-                          🕵️‍♂️ Research Trip
-                        </button>
+                        {/* Bottom Row: Price and Dates/Expires */}
+                        <div className="mt-auto pt-4">
+                          <div className="text-2xl font-black font-heading text-white">${deal.dealPrice}</div>
+                          {isSJU ? (
+                            <div className="text-[9px] text-amber-500 font-bold mt-1">Expires in 48h</div>
+                          ) : (
+                            <div className="text-[9px] text-slate-500 mt-1">
+                              {formatDateRange(deal.outboundDate, deal.returnDate)}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </article>
-                  );
-                })}
-              </div>
-            )}
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            
           </section>
         )}
 
@@ -1118,6 +1327,240 @@ export default function App() {
         )}
 
       </main>
+
+      {/* DETAILED DEAL MODAL */}
+      {selectedDeal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
+          <div className="bg-[#0b0d13] border border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="bg-[#0c0f16]/95 border-b border-slate-900 px-6 py-4 flex justify-between items-center">
+              <div>
+                <span className="text-[10px] text-indigo-400 font-extrabold uppercase tracking-widest">
+                  DEAL RADAR ANALYSIS
+                </span>
+                <h3 className="text-white text-xl font-extrabold font-heading mt-1 leading-tight">
+                  {selectedDeal.destination}
+                </h3>
+              </div>
+              <button 
+                onClick={() => setSelectedDeal(null)}
+                className="text-slate-400 hover:text-white transition-colors text-2xl font-bold bg-transparent border-none cursor-pointer px-2 outline-none"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+              
+              {/* Price & Savings Header */}
+              <div className="flex justify-between items-center bg-[#131722]/80 border border-slate-900/60 p-4 rounded-xl">
+                <div>
+                  <div className="text-3xl font-black font-heading text-white">
+                    ${selectedDeal.dealPrice}
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider block mt-1">
+                    Normally ~${selectedDeal.normalPrice}
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="badge badge-success text-xs px-3 py-1 font-bold">
+                    {selectedDeal.savingsPercent}% OFF
+                  </span>
+                  <div className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider mt-1.5 font-mono">
+                    {selectedDeal.departureAirport} ➔ {selectedDeal.destinationAirport}
+                  </div>
+                </div>
+              </div>
+
+              {/* Description */}
+              <div className="space-y-2">
+                <h4 className="text-xs font-extrabold text-slate-400 uppercase tracking-widest">
+                  AGENT SUMMARY
+                </h4>
+                <p className="text-slate-300 text-sm leading-relaxed pretty-paragraph">
+                  {selectedDeal.description}
+                </p>
+                <div className="text-xs text-slate-500 mt-2 font-semibold">
+                  ✈️ Operated by: <span className="text-slate-300">{selectedDeal.airlines}</span>
+                </div>
+              </div>
+
+              {/* Travel Details */}
+              <div className="grid grid-cols-2 gap-3 bg-[#0c0f16]/90 border border-slate-900/40 p-3 rounded-xl text-xs text-slate-300">
+                <div>
+                  <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider mb-0.5">OUTBOUND</span>
+                  📅 {selectedDeal.outboundDate}
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider mb-0.5">RETURN</span>
+                  📅 {selectedDeal.returnDate}
+                </div>
+              </div>
+
+              {/* Long Layover Warning */}
+              {selectedDeal.longLayoverWarning && (
+                <div className="bg-rose-500/5 border border-rose-500/20 rounded-xl p-3 flex items-start gap-2.5 text-xs text-rose-400/90 leading-relaxed font-bold tracking-wide">
+                  <span className="relative flex h-2.5 w-2.5 mt-0.5 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
+                  </span>
+                  <span>{selectedDeal.longLayoverWarning}</span>
+                </div>
+              )}
+
+              {/* Card Wallet Recommender */}
+              <div className="border-t border-slate-900 pt-4 space-y-3">
+                <div className="text-[10px] text-indigo-400 font-extrabold uppercase tracking-widest">
+                  💳 CARD WALLET PAYMENT OPTIMIZATION
+                </div>
+                
+                {calculateCardBenefits(selectedDeal.dealPrice).length > 0 ? (
+                  <div className="space-y-2">
+                    {calculateCardBenefits(selectedDeal.dealPrice).slice(0, 2).map((benefit, bIdx) => (
+                      <div key={benefit.cardName} className={`border rounded-xl p-3 flex items-center justify-between gap-4 ${
+                        bIdx === 0 ? 'bg-indigo-950/10 border-indigo-500/25' : 'bg-slate-950/20 border-slate-900/60'
+                      }`}>
+                        <div>
+                          <div className="text-xs font-bold text-slate-200">
+                            {bIdx === 0 && '👑 '}
+                            {benefit.cardName}
+                          </div>
+                          <p className="text-[10px] text-slate-500 mt-1">{benefit.idealFor}</p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <span className="text-xs font-extrabold text-emerald-400 block">
+                            +{benefit.points.toLocaleString()} pts
+                          </span>
+                          <span className="text-[10px] text-slate-400 mt-0.5 block font-mono">
+                            Worth ~${benefit.savings} ({benefit.returnRate.toFixed(1)}% back)
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                    <div className="text-[9px] text-slate-500 leading-normal text-right">
+                      Calculated for family of {profile.familyProfile.adults + profile.familyProfile.kids} (Total purchase: ${(selectedDeal.dealPrice * (profile.familyProfile.adults + profile.familyProfile.kids)).toLocaleString()})
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500 italic">
+                    Add credit cards in the Card Wallet tab to calculate customized point rewards for this transaction.
+                  </p>
+                )}
+              </div>
+
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-[#0c0f16]/95 border-t border-slate-900 px-6 py-4 flex gap-3">
+              <a 
+                href={selectedDeal.bookingLink} 
+                target="_blank" 
+                rel="noreferrer" 
+                className="btn btn-primary flex-1 text-center py-2.5 text-xs shadow-lg shadow-indigo-600/20 leading-none flex items-center justify-center"
+              >
+                BOOK FLIGHT 🛫
+              </a>
+              <button 
+                onClick={() => {
+                  setSelectedDeal(null);
+                  researchTrip(selectedDeal);
+                }} 
+                className="btn btn-secondary py-2.5 text-xs leading-none"
+              >
+                🕵️‍♂️ RESEARCH TRIP
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FLOATING BOTTOM NAVIGATION BAR */}
+      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[90] w-full max-w-4xl px-6 animate-in slide-in-from-bottom-6 duration-300">
+        <div className="bg-[#0b0d13]/85 backdrop-blur-xl border border-slate-800/40 shadow-2xl rounded-2xl p-2 flex items-center justify-between gap-2">
+          
+          <button 
+            onClick={() => setActiveTab('deals')} 
+            className={`flex-1 flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all border border-transparent cursor-pointer ${
+              activeTab === 'deals' 
+                ? 'bg-[#5f5af6] border-indigo-500/20 text-white shadow-lg shadow-indigo-600/30' 
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
+            }`}
+          >
+            <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            <div className="text-left leading-tight hidden md:block">
+              <div className="text-xs font-bold font-heading">Flight Deals</div>
+              <div className={`text-[9px] mt-0.5 font-medium ${activeTab === 'deals' ? 'text-indigo-200' : 'text-slate-500'}`}>
+                {deals.length || 6} active drops
+              </div>
+            </div>
+            <span className="text-[10px] font-bold md:hidden">Deals</span>
+          </button>
+          
+          <button 
+            onClick={() => setActiveTab('wallet')} 
+            className={`flex-1 flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all border border-transparent cursor-pointer ${
+              activeTab === 'wallet' 
+                ? 'bg-[#5f5af6] border-indigo-500/20 text-white shadow-lg shadow-indigo-600/30' 
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
+            }`}
+          >
+            <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+            </svg>
+            <div className="text-left leading-tight hidden md:block">
+              <div className="text-xs font-bold font-heading">Card Wallet</div>
+              <div className={`text-[9px] mt-0.5 font-medium ${activeTab === 'wallet' ? 'text-indigo-200' : 'text-slate-500'}`}>
+                {profile.creditCards.length} cards optimized
+              </div>
+            </div>
+            <span className="text-[10px] font-bold md:hidden">Wallet</span>
+          </button>
+          
+          <button 
+            onClick={() => setActiveTab('itinerary')} 
+            className={`flex-1 flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all border border-transparent cursor-pointer ${
+              activeTab === 'itinerary' 
+                ? 'bg-[#5f5af6] border-indigo-500/20 text-white shadow-lg shadow-indigo-600/30' 
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
+            }`}
+          >
+            <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L16 4m0 13V4m0 0L9 7" />
+            </svg>
+            <div className="text-left leading-tight hidden md:block">
+              <div className="text-xs font-bold font-heading">Trip Planner</div>
+              <div className={`text-[9px] mt-0.5 font-medium ${activeTab === 'itinerary' ? 'text-indigo-200' : 'text-slate-500'}`}>
+                AI itineraries
+              </div>
+            </div>
+            <span className="text-[10px] font-bold md:hidden">Planner</span>
+          </button>
+          
+          <button 
+            onClick={() => setActiveTab('agent')} 
+            className={`flex-1 flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all border border-transparent cursor-pointer ${
+              activeTab === 'agent' 
+                ? 'bg-[#5f5af6] border-indigo-500/20 text-white shadow-lg shadow-indigo-600/30' 
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
+            }`}
+          >
+            <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            <div className="text-left leading-tight hidden md:block">
+              <div className="text-xs font-bold font-heading">Agent Terminal</div>
+              <div className={`text-[9px] mt-0.5 font-medium ${activeTab === 'agent' ? 'text-indigo-200' : 'text-slate-500'}`}>
+                {scanning ? 'Scanning...' : 'Daemon armed'}
+              </div>
+            </div>
+            <span className="text-[10px] font-bold md:hidden">Terminal</span>
+          </button>
+          
+        </div>
+      </div>
     </div>
   );
 }
