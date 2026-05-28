@@ -1,0 +1,23 @@
+# Dependency Directories
+node_modules/
+
+# Build outputs
+dist/
+dist-ssr/
+*.local
+
+# Private Credentials (CRITICAL)
+.env
+.env*.local
+
+# Local File Databases
+data/
+*.json.json
+
+# Firebase Configurations
+.firebase/
+firebase-debug.log
+firestore-debug.log
+
+# OS leftovers
+.DS_Store
