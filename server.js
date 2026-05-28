@@ -9,6 +9,7 @@ import { OAuth2Client } from 'google-auth-library';
 import admin from 'firebase-admin';
 import * as functions from 'firebase-functions';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
+import fs from 'fs/promises';
 
 // Load environmental variables
 dotenv.config();
@@ -32,6 +33,70 @@ try {
   console.log("[Firebase] Admin SDK initialization tip: (runs on default credentials in Cloud Functions). Local warning:", error.message);
 }
 const db = admin.firestore();
+
+// Helper to get a document from Firestore, falling back to local file storage if Firestore fails/is not configured
+async function getDbDoc(collection, docId, defaultVal) {
+  try {
+    const doc = await db.collection(collection).doc(docId).get();
+    if (doc.exists) {
+      return doc.data();
+    }
+    return null;
+  } catch (error) {
+    console.warn(`[Firestore Warning] Falling back to local file for ${collection}/${docId}:`, error.message);
+    const userFilename = `${collection}_${docId}.json`;
+    const defaultFilename = `${collection}.json`;
+    const userPath = path.join(__dirname, 'data', userFilename);
+    const defaultPath = path.join(__dirname, 'data', defaultFilename);
+    
+    try {
+      const data = await fs.readFile(userPath, 'utf8');
+      const parsed = JSON.parse(data);
+      if (collection === 'deals' && Array.isArray(parsed)) {
+        return { deals: parsed };
+      }
+      if (collection === 'logs' && Array.isArray(parsed)) {
+        return { logs: parsed };
+      }
+      return parsed;
+    } catch (err) {
+      try {
+        const data = await fs.readFile(defaultPath, 'utf8');
+        const parsed = JSON.parse(data);
+        if (collection === 'deals' && Array.isArray(parsed)) {
+          return { deals: parsed };
+        }
+        if (collection === 'logs' && Array.isArray(parsed)) {
+          return { logs: parsed };
+        }
+        return parsed;
+      } catch (defaultErr) {
+        return defaultVal;
+      }
+    }
+  }
+}
+
+// Helper to save a document to Firestore, falling back to local file storage if Firestore fails/is not configured
+async function setDbDoc(collection, docId, data) {
+  try {
+    await db.collection(collection).doc(docId).set(data);
+    return true;
+  } catch (error) {
+    console.warn(`[Firestore Warning] Falling back to local file write for ${collection}/${docId}:`, error.message);
+    const userFilename = `${collection}_${docId}.json`;
+    const userPath = path.join(__dirname, 'data', userFilename);
+    
+    try {
+      await fs.mkdir(path.join(__dirname, 'data'), { recursive: true });
+      await fs.writeFile(userPath, JSON.stringify(data, null, 2), 'utf8');
+      return true;
+    } catch (err) {
+      console.error(`[Local DB Error] Failed to write local file ${userFilename}:`, err.message);
+      return false;
+    }
+  }
+}
 
 // Google Auth Client
 const client = new OAuth2Client(process.env.VITE_GOOGLE_CLIENT_ID || '');
@@ -91,85 +156,58 @@ app.use(authenticateUser);
 // API ROUTES
 // ----------------------------------------------------
 
-// Get deals from Firestore
+// Get deals from Firestore / Local Fallback
 app.get('/api/deals', async (req, res) => {
-  try {
-    const userId = req.user ? req.user.id : 'guest';
-    const doc = await db.collection('deals').doc(userId).get();
-    if (!doc.exists) {
-      return res.json([]);
-    }
-    res.json(doc.data().deals || []);
-  } catch (error) {
-    console.error("Error reading deals from Firestore:", error);
-    res.json([]);
-  }
+  const userId = req.user ? req.user.id : 'guest';
+  const data = await getDbDoc('deals', userId, { deals: [] });
+  res.json(data ? (data.deals || []) : []);
 });
 
-// Get profile from Firestore
+// Get profile from Firestore / Local Fallback
 app.get('/api/profile', async (req, res) => {
-  try {
-    const userId = req.user ? req.user.id : 'guest';
-    const doc = await db.collection('profiles').doc(userId).get();
-    if (!doc.exists) {
-      // Create and save optimized family-of-3 default profile for new user
-      const defaultProfile = {
-        airports: [{ code: "ATL", name: "Hartsfield-Jackson Atlanta (ATL)", type: "biggest" }],
-        creditCards: ["Chase Sapphire Reserve", "Amex Gold"],
-        familyProfile: { adults: 2, kids: 1, budget: 2500, interests: ["Beach", "Kid-Friendly"] },
-        activeEngine: "demo"
-      };
-      await db.collection('profiles').doc(userId).set(defaultProfile);
-      return res.json(defaultProfile);
-    }
-    res.json(doc.data());
-  } catch (error) {
-    console.error("Error reading profile from Firestore:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Update profile in Firestore
-app.post('/api/profile', async (req, res) => {
-  try {
-    const userId = req.user ? req.user.id : 'guest';
-    const newProfile = req.body;
-    await db.collection('profiles').doc(userId).set(newProfile);
-    res.json({ success: true, profile: newProfile });
-  } catch (error) {
-    console.error("Error saving profile to Firestore:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get logs from Firestore
-app.get('/api/logs', async (req, res) => {
-  try {
-    const userId = req.user ? req.user.id : 'guest';
-    const doc = await db.collection('logs').doc(userId).get();
-    if (!doc.exists) {
-      return res.json([]);
-    }
-    res.json(doc.data().logs || []);
-  } catch (error) {
-    console.error("Error reading logs from Firestore:", error);
-    res.json([]);
-  }
-});
-
-// Trigger scan manually (Firestore Integration)
-app.post('/api/scan', async (req, res) => {
-  try {
-    const userId = req.user ? req.user.id : 'guest';
-    
-    // Load profile from Firestore (or fallback to defaults)
-    const doc = await db.collection('profiles').doc(userId).get();
-    const profile = doc.exists ? doc.data() : {
+  const userId = req.user ? req.user.id : 'guest';
+  let data = await getDbDoc('profiles', userId, null);
+  if (!data) {
+    // Create and save optimized family-of-3 default profile for new user
+    const defaultProfile = {
       airports: [{ code: "ATL", name: "Hartsfield-Jackson Atlanta (ATL)", type: "biggest" }],
       creditCards: ["Chase Sapphire Reserve", "Amex Gold"],
       familyProfile: { adults: 2, kids: 1, budget: 2500, interests: ["Beach", "Kid-Friendly"] },
       activeEngine: "demo"
     };
+    await setDbDoc('profiles', userId, defaultProfile);
+    return res.json(defaultProfile);
+  }
+  res.json(data);
+});
+
+// Update profile in Firestore / Local Fallback
+app.post('/api/profile', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
+  const newProfile = req.body;
+  await setDbDoc('profiles', userId, newProfile);
+  res.json({ success: true, profile: newProfile });
+});
+
+// Get logs from Firestore / Local Fallback
+app.get('/api/logs', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
+  const data = await getDbDoc('logs', userId, { logs: [] });
+  res.json(data ? (data.logs || []) : []);
+});
+
+// Trigger scan manually (Firestore / Local Fallback Integration)
+app.post('/api/scan', async (req, res) => {
+  try {
+    const userId = req.user ? req.user.id : 'guest';
+    
+    // Load profile
+    const profile = await getDbDoc('profiles', userId, {
+      airports: [{ code: "ATL", name: "Hartsfield-Jackson Atlanta (ATL)", type: "biggest" }],
+      creditCards: ["Chase Sapphire Reserve", "Amex Gold"],
+      familyProfile: { adults: 2, kids: 1, budget: 2500, interests: ["Beach", "Kid-Friendly"] },
+      activeEngine: "demo"
+    });
 
     const engine = profile.activeEngine || 'demo';
     const airports = profile.airports || [];
@@ -185,13 +223,13 @@ app.post('/api/scan', async (req, res) => {
     // Save results if scan succeeded or warning-succeeded
     if (scanResult.status === 'success' || scanResult.status === 'warning') {
       if (scanResult.deals && scanResult.deals.length > 0) {
-        await db.collection('deals').doc(userId).set({ deals: scanResult.deals });
+        await setDbDoc('deals', userId, { deals: scanResult.deals });
       }
     }
 
     // Save to logs (limit log history to top 15 records)
-    const logsDoc = await db.collection('logs').doc(userId).get();
-    let logsDb = logsDoc.exists ? logsDoc.data().logs : [];
+    const logsData = await getDbDoc('logs', userId, { logs: [] });
+    let logsDb = logsData ? logsData.logs : [];
     if (!Array.isArray(logsDb)) logsDb = [];
 
     const newLogItem = {
@@ -203,7 +241,7 @@ app.post('/api/scan', async (req, res) => {
       logs: scanResult.logs
     };
     logsDb.unshift(newLogItem);
-    await db.collection('logs').doc(userId).set({ logs: logsDb.slice(0, 15) });
+    await setDbDoc('logs', userId, { logs: logsDb.slice(0, 15) });
 
     res.json(scanResult);
   } catch (error) {
@@ -219,26 +257,25 @@ app.post('/api/research', async (req, res) => {
     const userId = req.user ? req.user.id : 'guest';
 
     // Load profile
-    const doc = await db.collection('profiles').doc(userId).get();
-    const profile = doc.exists ? doc.data() : {
+    const profile = await getDbDoc('profiles', userId, {
       airports: [{ code: "ATL", name: "Hartsfield-Jackson Atlanta (ATL)", type: "biggest" }],
       creditCards: ["Chase Sapphire Reserve", "Amex Gold"],
       familyProfile: { adults: 2, kids: 1, budget: 2500, interests: ["Beach", "Kid-Friendly"] },
       activeEngine: "demo"
-    };
+    });
     const familyProfile = profile.familyProfile;
     
-    // Check if itinerary is already cached in Firestore to save Gemini API costs
+    // Check if itinerary is already cached in Firestore / Local File to save Gemini API costs
     const cacheDocId = `itin_${departureAirport}_${destinationAirport}`.toLowerCase().replace(/[^a-z0-9_]/g, '_');
     
     try {
-      const cacheDoc = await db.collection('itinerary_caches').doc(cacheDocId).get();
-      if (cacheDoc.exists) {
-        console.log(`[Research Engine] Found cached Firestore itinerary for ${destinationAirport}`);
-        return res.json({ itinerary: cacheDoc.data().itinerary });
+      const cacheData = await getDbDoc('itinerary_caches', cacheDocId, null);
+      if (cacheData && cacheData.itinerary) {
+        console.log(`[Research Engine] Found cached itinerary for ${destinationAirport}`);
+        return res.json({ itinerary: cacheData.itinerary });
       }
     } catch (e) {
-      console.log("[Research Engine] Cache doc lookup failed, continuing with live research.");
+      console.log("[Research Engine] Cache lookup failed, continuing with live research.");
     }
     
     console.log(`[Research Engine] Generating new custom itinerary for ${destination}...`);
@@ -251,15 +288,15 @@ app.post('/api/research', async (req, res) => {
       geminiKey: process.env.GEMINI_API_KEY
     });
 
-    // Cache the result in Firestore
+    // Cache the result
     try {
-      await db.collection('itinerary_caches').doc(cacheDocId).set({
+      await setDbDoc('itinerary_caches', cacheDocId, {
         timestamp: new Date().toISOString(),
         destination,
         itinerary: itineraryMarkdown
       });
     } catch (cacheErr) {
-      console.error("Firestore itinerary caching failed:", cacheErr.message);
+      console.error("Itinerary caching failed:", cacheErr.message);
     }
 
     res.json({ itinerary: itineraryMarkdown });
