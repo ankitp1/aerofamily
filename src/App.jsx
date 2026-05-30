@@ -276,8 +276,8 @@ export default function App() {
     setOnboardingStep(prev => {
       const next = prev + 1;
       if (next === 3) setActiveTab('deals');
-      if (next === 5) setActiveTab('agent');
-      if (next === 6) setActiveTab('wallet');
+      if (next === 5) setActiveTab('settings');
+      if (next === 6) setActiveTab('settings');
       if (next > 6) {
         localStorage.setItem('aerofamily_onboarded', 'true');
         return null;
@@ -291,8 +291,8 @@ export default function App() {
       const back = Math.max(1, prev - 1);
       if (back === 1 && isLoggedIn) return prev;
       if (back === 3 || back === 2 || back === 4) setActiveTab('deals');
-      if (back === 5) setActiveTab('agent');
-      if (back === 6) setActiveTab('wallet');
+      if (back === 5) setActiveTab('settings');
+      if (back === 6) setActiveTab('settings');
       return back;
     });
   };
@@ -1162,14 +1162,14 @@ export default function App() {
           </section>
         )}
 
-        {/* TAB 2: CREDIT CARD WALLET */}
-        {activeTab === 'wallet' && (
-          <section className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Wallet checklist */}
+        {/* TAB 2: SETTINGS & WALLET */}
+        {activeTab === 'settings' && (
+          <section className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-in fade-in duration-300">
+            {/* Left Column: Credit Card Wallet (2 cols wide) */}
             <div className="lg:col-span-2 space-y-6">
               <div>
-                <h2 className="text-2xl font-extrabold font-heading">💳 My Travel Credit Card Wallet</h2>
-                <p className="text-sm text-slate-400">Select the credit cards you own to automatically calculate reward points and select optimal payment strategies for flight deals.</p>
+                <h2 className="text-xl font-extrabold font-heading text-white">💳 My Travel Credit Card Wallet</h2>
+                <p className="text-xs text-slate-400 mt-1">Select the credit cards you own to automatically calculate reward points and select optimal payment strategies for flight deals.</p>
               </div>
 
               <div className="space-y-3">
@@ -1206,27 +1206,155 @@ export default function App() {
                   );
                 })}
               </div>
+
+              {/* Collapsible Developer accordion */}
+              <details className="group glass-card p-1 border-slate-800/80 shadow-2xl">
+                <summary className="flex justify-between items-center p-4 font-heading font-bold text-sm text-slate-300 cursor-pointer select-none">
+                  <div className="flex items-center gap-2">
+                    <span>💻</span>
+                    <span>Developer Logs & Agent Terminal</span>
+                  </div>
+                  <span className="text-xs text-indigo-400 font-semibold group-open:hidden">Show Logs ➔</span>
+                  <span className="text-xs text-indigo-400 font-semibold hidden group-open:inline">Hide Logs ✕</span>
+                </summary>
+                
+                <div className="p-4 pt-0 space-y-4">
+                  <div className="flex flex-col h-[350px] bg-slate-950 rounded-xl overflow-hidden border border-slate-900">
+                    {/* Console Header */}
+                    <div className="bg-slate-950 px-4 py-2.5 border-b border-slate-900 flex justify-between items-center">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block"></span>
+                        <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block"></span>
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>
+                        <span className="text-[10px] text-slate-500 font-mono ml-2">flight_agent_daemon.sh</span>
+                      </div>
+                      <button 
+                        onClick={triggerScan}
+                        disabled={scanning}
+                        className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-[10px] font-bold font-mono disabled:opacity-50"
+                      >
+                        {scanning ? 'RUNNING...' : 'DEPLOY AGENT'}
+                      </button>
+                    </div>
+
+                    {/* Console Terminal Screen */}
+                    <div className="flex-1 bg-slate-950 p-4 font-mono text-[11px] overflow-y-auto text-emerald-400 space-y-1.5">
+                      {scanConsoleLogs.length === 0 ? (
+                        <div className="text-slate-500 text-center pt-24">
+                          <p>&gt; Agent Terminal Ready.</p>
+                          <p className="mt-2 text-[10px]">Hit "DEPLOY AGENT" above to see the logs, triggers, routing, and calculations in real time.</p>
+                        </div>
+                      ) : (
+                        scanConsoleLogs.map((logLine, idx) => {
+                          let color = 'text-emerald-400';
+                          if (logLine.includes('[System Error]')) color = 'text-rose-400';
+                          else if (logLine.includes('[System]')) color = 'text-indigo-400';
+                          else if (logLine.includes('Warning:')) color = 'text-amber-400';
+                          
+                          return (
+                            <div key={idx} className={color}>
+                              &gt; {logLine}
+                            </div>
+                          );
+                        })
+                      )}
+                      <div ref={terminalEndRef}></div>
+                    </div>
+                  </div>
+
+                  {/* Database logs history */}
+                  <div className="space-y-3 pt-2">
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-500">⏱️ Scan Execution History (data/logs.json)</h4>
+                    {logs.length === 0 ? (
+                      <p className="text-[11px] text-slate-500 italic">No past scans logged yet.</p>
+                    ) : (
+                      <div className="space-y-1.5 max-h-[150px] overflow-y-auto pr-1">
+                        {logs.slice(0, 5).map((logItem, idx) => (
+                          <div key={idx} className="bg-slate-950/60 border border-slate-900/60 p-2.5 rounded-lg flex justify-between items-center text-[11px]">
+                            <div>
+                              <span className="font-bold text-slate-300">🔍 {logItem.message}</span>
+                              <div className="text-[9px] text-slate-500 mt-0.5">
+                                Engine: {logItem.engine.toUpperCase()} • Time: {new Date(logItem.timestamp).toLocaleTimeString()}
+                              </div>
+                            </div>
+                            <span className={`badge text-[8px] px-1.5 py-0 ${
+                              logItem.status === 'success' ? 'badge-success' : logItem.status === 'warning' ? 'badge-warning' : 'bg-rose-950/20 border-rose-800 text-rose-400 border'
+                            }`}>
+                              {logItem.status}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </details>
             </div>
 
-            {/* Valuation Guide */}
+            {/* Right Column: Agent Settings & Airport Origins (1 col wide) */}
             <div className="space-y-6">
-              <div className="glass-card p-5 space-y-4">
-                <h3 className="text-lg font-bold font-heading text-white border-b border-slate-800 pb-2">📊 Card Valuations Math</h3>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Our system evaluates rewards by calculating your **Net Return Rate** on each purchase. 
-                </p>
-                <div className="bg-slate-950/40 p-3 rounded-lg border border-slate-800 text-[11px] font-mono text-slate-300 space-y-1">
-                  <div>Formula:</div>
-                  <div className="text-indigo-400">Cost * Multiplier * PointValue</div>
-                  <div className="border-t border-slate-800 my-1"></div>
-                  <div>Example (Amex Platinum):</div>
-                  <div>$1,000 * 5x = 5,000 Points</div>
-                  <div>5,000 * 2.0¢ = $100 Rewards</div>
-                  <div className="text-emerald-400">Net Return: 10% back!</div>
+              <div className="glass-card p-5 space-y-5">
+                <h3 className="text-lg font-bold font-heading text-white border-b border-slate-800 pb-2">🤖 Agent Setup</h3>
+                
+                {/* Select Flight Scanner Engine */}
+                <div className="form-group">
+                  <label className="form-label">⚙️ Active Scan Engine</label>
+                  <select 
+                    value={profile.activeEngine} 
+                    onChange={(e) => saveProfile({ ...profile, activeEngine: e.target.value })}
+                    className="form-control text-xs"
+                  >
+                    <option value="demo">Demo Mode (Fidelity Mock, No Keys)</option>
+                    <option value="kiwi">Kiwi.com Tequila API (Real Anywhere Search)</option>
+                    <option value="gemini">Gemini Web Grounding (Live AI Search)</option>
+                    <option value="travelpayouts">Travelpayouts API (Real Global Cache)</option>
+                  </select>
+                  <p className="text-[9px] text-slate-500 mt-1.5 leading-normal">
+                    {profile.activeEngine === 'demo' && "• Safely works immediately. Simulates drops with rich, seasonal route mock engines."}
+                    {profile.activeEngine === 'kiwi' && "• Connects to Kiwi's powerful Tequila engine to find the cheapest active flights from your origin to anywhere in the world. Requires KIWI_API_KEY."}
+                    {profile.activeEngine === 'gemini' && "• Searches the live web using Gemini 2.5 Flash Google Search integration. Requires GEMINI_API_KEY."}
+                    {profile.activeEngine === 'travelpayouts' && "• Directly pulls cached airline ticket prices queried by global users. Requires TRAVELPAYOUTS_TOKEN."}
+                  </p>
                 </div>
-                <div className="text-[11px] text-slate-500 space-y-1">
-                  <p>• Point valuations represent high-impact transfer partners (e.g. Hyatt, Emirates, Singapore Airlines) average returns.</p>
-                  <p>• Valuations are updated for 2026 travel parameters.</p>
+
+                {/* Configured Departure Airports */}
+                <div className="form-group border-t border-slate-900 pt-4">
+                  <label className="form-label">🛫 My Departure Origins</label>
+                  <div className="flex gap-2 mt-1">
+                    <input 
+                      type="text" 
+                      maxLength="3"
+                      placeholder="e.g. JFK" 
+                      value={newAirportCode}
+                      onChange={(e) => setNewAirportCode(e.target.value)}
+                      className="form-control text-xs flex-1 uppercase"
+                    />
+                    <button onClick={addAirport} className="btn btn-secondary px-3 py-1 text-xs min-h-[36px]">Add</button>
+                  </div>
+
+                  <div className="space-y-1.5 mt-3">
+                    {profile.airports.map(airport => (
+                      <div key={airport.code} className="flex justify-between items-center bg-slate-950/60 border border-slate-900 rounded px-2.5 py-1.5 text-xs">
+                        <div>
+                          <span className="font-bold text-indigo-300 font-mono">{airport.code}</span>
+                          <span className="text-slate-400 ml-2 text-[10px]">{airport.name}</span>
+                        </div>
+                        <button 
+                          onClick={() => removeAirport(airport.code)}
+                          className="text-rose-400 hover:text-rose-500 font-bold px-1.5"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Scheduled background daemon parameters */}
+                <div className="border-t border-slate-900 pt-4 text-xs text-slate-500 space-y-1.5">
+                  <div className="font-bold text-[9px] uppercase text-indigo-400 tracking-wider">📅 Background Daemon Schedule</div>
+                  <div>• Frequency: Twice daily (every 12 hours)</div>
+                  <div>• Next scan: Automatic background interval armed</div>
                 </div>
               </div>
             </div>
@@ -1344,161 +1472,7 @@ export default function App() {
           </section>
         )}
 
-        {/* TAB 4: AGENT CONTROL PANEL */}
-        {activeTab === 'agent' && (
-          <section className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              
-              {/* Agent Settings Pane */}
-              <div className="space-y-6">
-                <div className="glass-card p-5 space-y-5">
-                  <h3 className="text-lg font-bold font-heading text-white border-b border-slate-800 pb-2">🤖 Agent Setup</h3>
-                  
-                  {/* Select Flight Scanner Engine */}
-                  <div className="form-group">
-                    <label className="form-label">⚙️ Active Scan Engine</label>
-                    <select 
-                      value={profile.activeEngine} 
-                      onChange={(e) => saveProfile({ ...profile, activeEngine: e.target.value })}
-                      className="form-control"
-                    >
-                      <option value="demo">Demo Mode (Fidelity Mock, No Keys)</option>
-                      <option value="kiwi">Kiwi.com Tequila API (Real Anywhere Search)</option>
-                      <option value="gemini">Gemini Web Grounding (Live AI Search)</option>
-                      <option value="travelpayouts">Travelpayouts API (Real Global Cache)</option>
-                    </select>
-                    <p className="text-[10px] text-slate-400 mt-0.5 leading-relaxed">
-                      {profile.activeEngine === 'demo' && "• Safely works immediately. Simulates drops with rich, seasonal route mock engines."}
-                      {profile.activeEngine === 'kiwi' && "• Connects to Kiwi's powerful Tequila engine to find the cheapest active flights from your origin to anywhere in the world. Requires KIWI_API_KEY."}
-                      {profile.activeEngine === 'gemini' && "• Searches the live web using Gemini 2.5 Flash Google Search integration. Requires GEMINI_API_KEY."}
-                      {profile.activeEngine === 'travelpayouts' && "• Directly pulls cached airline ticket prices queried by global users. Requires TRAVELPAYOUTS_TOKEN."}
-                    </p>
-                    <div className="bg-slate-900/60 border border-slate-800 rounded p-2.5 mt-2 text-[10px] text-indigo-300 leading-normal">
-                      💡 <strong>No Kiwi Key? No problem!</strong> Use the <strong>Gemini Web Grounding</strong> or <strong>Travelpayouts</strong> engines. AeroFamily will automatically use your Travelpayouts Token (already active!) to verify and date-correct all deals!
-                    </div>
-                  </div>
 
-                  {/* Configured Departure Airports */}
-                  <div className="form-group">
-                    <label className="form-label">🛫 My Departure Airports</label>
-                    <div className="flex gap-2">
-                      <input 
-                        type="text" 
-                        maxLength="3"
-                        placeholder="e.g. JFK" 
-                        value={newAirportCode}
-                        onChange={(e) => setNewAirportCode(e.target.value)}
-                        className="form-control flex-1 uppercase"
-                      />
-                      <button onClick={addAirport} className="btn btn-secondary px-4 py-2">Add</button>
-                    </div>
-
-                    <div className="space-y-2 mt-3">
-                      {profile.airports.map(airport => (
-                        <div key={airport.code} className="flex justify-between items-center bg-slate-900/60 border border-slate-800 rounded px-3 py-2 text-xs">
-                          <div>
-                            <span className="font-bold text-indigo-300 font-mono">{airport.code}</span>
-                            <span className="text-slate-400 ml-2 text-[10px]">{airport.name}</span>
-                          </div>
-                          <button 
-                            onClick={() => removeAirport(airport.code)}
-                            className="text-rose-400 hover:text-rose-500 font-bold px-2"
-                          >
-                            ×
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Scheduled background daemon parameters */}
-                  <div className="border-t border-slate-800 pt-3 text-xs text-slate-400 space-y-1.5">
-                    <div className="font-bold text-[10px] uppercase text-indigo-400">📅 Background Daemon Schedule</div>
-                    <div>• Frequency: **Twice daily** (every 12 hours)</div>
-                    <div>• Next scan: **Automatic background interval armed**</div>
-                    <div className="text-[10px] text-slate-500 mt-1 italic">Runs silently in background thread. Stores results inside deals.json file locally.</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Console log terminal visualizer */}
-              <div className="lg:col-span-2 space-y-6">
-                <div className="glass-card flex flex-col h-[500px] border-slate-800/80 shadow-2xl">
-                  
-                  {/* Console Header */}
-                  <div className="bg-slate-950 px-4 py-3 rounded-t-lg border-b border-slate-800 flex justify-between items-center">
-                    <div className="flex items-center gap-2">
-                      <span className="w-3 h-3 rounded-full bg-rose-500 inline-block"></span>
-                      <span className="w-3 h-3 rounded-full bg-amber-500 inline-block"></span>
-                      <span className="w-3 h-3 rounded-full bg-emerald-500 inline-block"></span>
-                      <span className="text-xs text-slate-400 font-mono ml-2">flight_agent_daemon.sh</span>
-                    </div>
-                    <button 
-                      onClick={triggerScan}
-                      disabled={scanning}
-                      className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-xs font-bold font-mono disabled:opacity-50"
-                    >
-                      {scanning ? 'RUNNING...' : 'DEPLOY AGENT'}
-                    </button>
-                  </div>
-
-                  {/* Console Terminal Screen */}
-                  <div className="flex-1 bg-slate-950 p-4 font-mono text-xs overflow-y-auto text-emerald-400 space-y-1.5">
-                    {scanConsoleLogs.length === 0 ? (
-                      <div className="text-slate-500 text-center pt-32">
-                        <p>&gt; Agent Terminal Ready.</p>
-                        <p className="mt-2 text-[11px]">Hit "DEPLOY AGENT" above to see the logs, triggers, routing, and calculations in real time.</p>
-                      </div>
-                    ) : (
-                      scanConsoleLogs.map((logLine, idx) => {
-                        let color = 'text-emerald-400';
-                        if (logLine.includes('[System Error]')) color = 'text-rose-400';
-                        else if (logLine.includes('[System]')) color = 'text-indigo-400';
-                        else if (logLine.includes('Warning:')) color = 'text-amber-400';
-                        
-                        return (
-                          <div key={idx} className={color}>
-                            &gt; {logLine}
-                          </div>
-                        );
-                      })
-                    )}
-                    <div ref={terminalEndRef}></div>
-                  </div>
-                </div>
-
-                {/* Database logs history */}
-                <div className="space-y-4">
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 font-heading">⏱️ Scan Execution History (data/logs.json)</h3>
-                  
-                  {logs.length === 0 ? (
-                    <p className="text-xs text-slate-500 italic">No past scans logged yet.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {logs.map((logItem, idx) => (
-                        <div key={idx} className="glass-card p-3 flex justify-between items-center text-xs">
-                          <div>
-                            <span className="font-bold text-slate-200">🔍 {logItem.message}</span>
-                            <div className="text-[10px] text-slate-500 mt-0.5">
-                              Engine: **{logItem.engine.toUpperCase()}** • Time: {new Date(logItem.timestamp).toLocaleString()}
-                            </div>
-                          </div>
-                          <span className={`badge text-[9px] ${
-                            logItem.status === 'success' ? 'badge-success' : logItem.status === 'warning' ? 'badge-warning' : 'bg-rose-950/20 border-rose-800 text-rose-400 border'
-                          }`}>
-                            {logItem.status}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-              </div>
-
-            </div>
-          </section>
-        )}
 
       </main>
 
@@ -1673,64 +1647,47 @@ export default function App() {
             <span className="text-[10px] font-bold md:hidden">Deals</span>
           </button>
           
+          {(activeItinerary !== null || researchingDest !== null) && (
+            <button 
+              onClick={() => setActiveTab('itinerary')} 
+              className={`flex-1 flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all border border-transparent cursor-pointer ${
+                activeTab === 'itinerary' 
+                  ? 'bg-[#5f5af6] border-indigo-500/20 text-white shadow-lg shadow-indigo-600/30' 
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
+              }`}
+            >
+              <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L16 4m0 13V4m0 0L9 7" />
+              </svg>
+              <div className="text-left leading-tight hidden md:block">
+                <div className="text-xs font-bold font-heading">Trip Planner</div>
+                <div className={`text-[9px] mt-0.5 font-medium ${activeTab === 'itinerary' ? 'text-indigo-200' : 'text-slate-500'}`}>
+                  {researchingDest ? 'Researching...' : 'AI itineraries'}
+                </div>
+              </div>
+              <span className="text-[10px] font-bold md:hidden">Planner</span>
+            </button>
+          )}
+
           <button 
-            onClick={() => setActiveTab('wallet')} 
+            onClick={() => setActiveTab('settings')} 
             className={`flex-1 flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all border border-transparent cursor-pointer ${
-              activeTab === 'wallet' 
+              activeTab === 'settings' 
                 ? 'bg-[#5f5af6] border-indigo-500/20 text-white shadow-lg shadow-indigo-600/30' 
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
             }`}
           >
             <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
             <div className="text-left leading-tight hidden md:block">
-              <div className="text-xs font-bold font-heading">Card Wallet</div>
-              <div className={`text-[9px] mt-0.5 font-medium ${activeTab === 'wallet' ? 'text-indigo-200' : 'text-slate-500'}`}>
-                {profile.creditCards.length} cards optimized
+              <div className="text-xs font-bold font-heading">Settings & Wallet</div>
+              <div className={`text-[9px] mt-0.5 font-medium ${activeTab === 'settings' ? 'text-indigo-200' : 'text-slate-500'}`}>
+                Agent & Cards setup
               </div>
             </div>
-            <span className="text-[10px] font-bold md:hidden">Wallet</span>
-          </button>
-          
-          <button 
-            onClick={() => setActiveTab('itinerary')} 
-            className={`flex-1 flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all border border-transparent cursor-pointer ${
-              activeTab === 'itinerary' 
-                ? 'bg-[#5f5af6] border-indigo-500/20 text-white shadow-lg shadow-indigo-600/30' 
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
-            }`}
-          >
-            <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L16 4m0 13V4m0 0L9 7" />
-            </svg>
-            <div className="text-left leading-tight hidden md:block">
-              <div className="text-xs font-bold font-heading">Trip Planner</div>
-              <div className={`text-[9px] mt-0.5 font-medium ${activeTab === 'itinerary' ? 'text-indigo-200' : 'text-slate-500'}`}>
-                AI itineraries
-              </div>
-            </div>
-            <span className="text-[10px] font-bold md:hidden">Planner</span>
-          </button>
-          
-          <button 
-            onClick={() => setActiveTab('agent')} 
-            className={`flex-1 flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all border border-transparent cursor-pointer ${
-              activeTab === 'agent' 
-                ? 'bg-[#5f5af6] border-indigo-500/20 text-white shadow-lg shadow-indigo-600/30' 
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
-            }`}
-          >
-            <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
-            <div className="text-left leading-tight hidden md:block">
-              <div className="text-xs font-bold font-heading">Agent Terminal</div>
-              <div className={`text-[9px] mt-0.5 font-medium ${activeTab === 'agent' ? 'text-indigo-200' : 'text-slate-500'}`}>
-                {scanning ? 'Scanning...' : 'Daemon armed'}
-              </div>
-            </div>
-            <span className="text-[10px] font-bold md:hidden">Terminal</span>
+            <span className="text-[10px] font-bold md:hidden">Settings</span>
           </button>
           
         </div>
