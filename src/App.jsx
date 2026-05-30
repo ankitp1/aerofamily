@@ -172,6 +172,181 @@ function MarkdownRenderer({ markdown }) {
   return <div className="markdown-body p-2">{elements}</div>;
 }
 
+// ---------------------------------------------------------------------------
+// Delta Award Search Panel — shown inside the deal detail modal
+// ---------------------------------------------------------------------------
+function DeltaAwardSearchPanel({ deal, awBalances, backendUrl, authHeaders }) {
+  const [awardData, setAwardData]   = useState(null);
+  const [searching, setSearching]   = useState(false);
+  const [searchError, setSearchError] = useState('');
+
+  const combinedMiles = awBalances.reduce((s, b) => s + b.balance, 0);
+
+  async function search(cabin) {
+    setSearching(true);
+    setSearchError('');
+    setAwardData(null);
+    try {
+      const params = new URLSearchParams({
+        origin:      deal.departureAirport,
+        destination: deal.destinationAirport,
+        ...(cabin ? { cabin } : {}),
+        days: '90',
+      });
+      const resp = await fetch(`${backendUrl}/api/delta/award-search?${params}`, { headers: authHeaders });
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error);
+      setAwardData(data);
+    } catch (e) {
+      setSearchError(e.message || 'Award search failed.');
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  const cabinColors = { economy: 'text-emerald-400', business: 'text-indigo-300', first: 'text-amber-300' };
+
+  return (
+    <div className="border-t border-slate-900 pt-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="text-[10px] text-red-400 font-extrabold uppercase tracking-widest">
+          ✈️ DELTA SKYMILES AWARD PRICING
+        </div>
+        <span className="text-[9px] text-slate-500">
+          {combinedMiles.toLocaleString()} miles available
+        </span>
+      </div>
+
+      {/* Search buttons */}
+      {!awardData && !searching && (
+        <div className="space-y-2">
+          <p className="text-[10px] text-slate-400">
+            Search Delta award availability for <span className="text-white font-bold">{deal.departureAirport} → {deal.destinationAirport}</span>:
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {['economy', 'business', 'first'].map(cabin => (
+              <button
+                key={cabin}
+                onClick={() => search(cabin)}
+                className="px-3 py-1.5 rounded-lg text-[10px] font-bold bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 capitalize transition-all"
+              >
+                {cabin === 'economy' ? '🪑' : cabin === 'business' ? '🛋️' : '👑'} {cabin}
+              </button>
+            ))}
+            <button
+              onClick={() => search(null)}
+              className="px-3 py-1.5 rounded-lg text-[10px] font-bold bg-red-900/30 hover:bg-red-900/50 border border-red-800/40 text-red-300 transition-all"
+            >
+              🔍 All Cabins
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Loading */}
+      {searching && (
+        <div className="flex items-center gap-2 text-xs text-slate-400 py-2">
+          <span className="animate-spin">⟳</span>
+          Searching Delta award space for {deal.departureAirport} → {deal.destinationAirport}…
+        </div>
+      )}
+
+      {/* Error */}
+      {searchError && (
+        <div className="text-xs text-rose-400 bg-rose-950/20 border border-rose-800/30 rounded px-3 py-2">
+          {searchError}
+        </div>
+      )}
+
+      {/* Results */}
+      {awardData && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[9px] text-slate-500">
+              via {awardData.source === 'seats.aero' ? 'seats.aero live data' : awardData.source === 'gemini' ? 'Gemini web search' : 'illustrative data'}
+              {awardData.note && ` · ${awardData.note}`}
+            </span>
+            <button onClick={() => { setAwardData(null); setSearchError(''); }} className="text-[9px] text-indigo-400 hover:text-indigo-300">
+              ← New Search
+            </button>
+          </div>
+
+          {!awardData.found ? (
+            <p className="text-xs text-slate-400 italic">{awardData.message || 'No award space found.'}</p>
+          ) : (
+            <div className="space-y-2">
+              {/* seats.aero results — date-by-date */}
+              {awardData.source === 'seats.aero' && awardData.results?.slice(0, 5).map((r, i) => {
+                const canAfford = combinedMiles >= r.miles;
+                return (
+                  <div key={i} className={`rounded-lg border px-3 py-2 flex items-center justify-between ${
+                    canAfford ? 'border-emerald-800/40 bg-emerald-950/10' : 'border-slate-800/60 bg-slate-900/30'
+                  }`}>
+                    <div>
+                      <div className="text-xs font-bold text-white">{r.date} · <span className="capitalize text-slate-300">{r.cabin}</span></div>
+                      <div className="text-[9px] text-slate-500 mt-0.5">{r.route} · +${r.taxes_usd} taxes</div>
+                    </div>
+                    <div className="text-right">
+                      <div className={`text-sm font-extrabold font-heading ${cabinColors[r.cabin] || 'text-white'}`}>
+                        {r.miles?.toLocaleString()}
+                      </div>
+                      <div className="text-[9px] text-slate-500">miles</div>
+                      {canAfford
+                        ? <div className="text-[9px] text-emerald-400 mt-0.5">✓ You can book</div>
+                        : <div className="text-[9px] text-rose-400 mt-0.5">Need {(r.miles - combinedMiles).toLocaleString()} more</div>
+                      }
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Gemini / demo results — cabin range view */}
+              {(awardData.source === 'gemini' || awardData.source === 'demo') && awardData.results?.map((r, i) => {
+                const milesNeeded = r.miles_low || r.miles_needed;
+                const canAfford   = combinedMiles >= milesNeeded;
+                return (
+                  <div key={i} className={`rounded-lg border px-3 py-2 flex items-center justify-between ${
+                    canAfford ? 'border-emerald-800/40 bg-emerald-950/10' : 'border-slate-800/60 bg-slate-900/30'
+                  }`}>
+                    <div>
+                      <div className={`text-xs font-bold capitalize ${cabinColors[r.cabin] || 'text-white'}`}>
+                        {r.cabin === 'economy' ? '🪑' : r.cabin === 'business' ? '🛋️' : '👑'} {r.cabin}
+                      </div>
+                      {r.notes && <div className="text-[9px] text-slate-500 mt-0.5 max-w-[180px]">{r.notes}</div>}
+                    </div>
+                    <div className="text-right">
+                      <div className={`text-sm font-extrabold font-heading ${cabinColors[r.cabin] || 'text-white'}`}>
+                        {r.miles_low?.toLocaleString()}
+                        {r.miles_high && r.miles_high !== r.miles_low && <span className="text-xs font-normal text-slate-400">–{r.miles_high?.toLocaleString()}</span>}
+                      </div>
+                      <div className="text-[9px] text-slate-500">miles {r.typical_taxes_usd ? `+$${r.typical_taxes_usd} taxes` : ''}</div>
+                      {canAfford
+                        ? <div className="text-[9px] text-emerald-400 mt-0.5">✓ You can book</div>
+                        : <div className="text-[9px] text-rose-400 mt-0.5">Need {(milesNeeded - combinedMiles).toLocaleString()} more</div>
+                      }
+                    </div>
+                  </div>
+                );
+              })}
+
+              {awardData.general_notes && (
+                <p className="text-[9px] text-slate-500 italic">{awardData.general_notes}</p>
+              )}
+
+              {awardData.source_url && (
+                <a href={awardData.source_url} target="_blank" rel="noreferrer"
+                  className="text-[9px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1">
+                  Book on delta.com →
+                </a>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   // App Auth States
   const [isLoggedIn, setIsLoggedIn] = useState(() => {
@@ -237,6 +412,165 @@ export default function App() {
       setWaOptInAlerts(profile.whatsapp.optInAlerts !== false);
     }
   }, [profile]);
+
+  // ── Wallet: Plaid + AwardWallet state ───────────────────────────────────
+  const [walletStatus, setWalletStatus]         = useState({ plaid: {}, awardwallet: {} });
+  const [plaidBalances, setPlaidBalances]        = useState([]);
+  const [awBalances, setAwBalances]              = useState([]);
+  const [syncingPlaid, setSyncingPlaid]          = useState(false);
+  const [syncingAW, setSyncingAW]                = useState(false);
+  const [showPlaidModal, setShowPlaidModal]      = useState(false);
+  const [showAwModal, setShowAwModal]            = useState(false);
+  const [walletError, setWalletError]            = useState('');
+
+  // Load wallet status + cached balances on mount (after profile loads)
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    fetchWalletStatus();
+  }, [isLoggedIn]);
+
+  const authHeaders = () => ({
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  });
+
+  async function fetchWalletStatus() {
+    try {
+      const resp = await fetch(`${BACKEND_URL}/api/wallet/status`, { headers: authHeaders() });
+      if (resp.ok) {
+        const data = await resp.json();
+        setWalletStatus(data);
+        // Auto-fetch balances if already connected
+        if (data.plaid?.connected)      fetchPlaidBalances();
+        if (data.awardwallet?.connected) fetchAwBalances();
+      }
+    } catch (_) {}
+  }
+
+  async function fetchPlaidBalances() {
+    setSyncingPlaid(true);
+    setWalletError('');
+    try {
+      const resp = await fetch(`${BACKEND_URL}/api/plaid/balances`, { headers: authHeaders() });
+      const data = await resp.json();
+      if (data.balances) setPlaidBalances(data.balances);
+    } catch (e) {
+      setWalletError('Failed to fetch card balances. Try again.');
+    } finally {
+      setSyncingPlaid(false);
+    }
+  }
+
+  async function fetchAwBalances() {
+    setSyncingAW(true);
+    setWalletError('');
+    try {
+      const resp = await fetch(`${BACKEND_URL}/api/awardwallet/balances`, { headers: authHeaders() });
+      const data = await resp.json();
+      if (data.balances) setAwBalances(data.balances);
+    } catch (e) {
+      setWalletError('Failed to fetch loyalty balances. Try again.');
+    } finally {
+      setSyncingAW(false);
+    }
+  }
+
+  // Simulate Plaid Link: request link token → show modal → on "connect" exchange token
+  async function openPlaidLink() {
+    setWalletError('');
+    try {
+      const resp = await fetch(`${BACKEND_URL}/api/plaid/create-link-token`, {
+        method: 'POST', headers: authHeaders(),
+      });
+      const data = await resp.json();
+      if (data.link_token) {
+        // If real Plaid SDK were loaded, we'd call Plaid Link here.
+        // In simulator mode (or without plaid-link SDK), we show our modal.
+        setShowPlaidModal(true);
+      }
+    } catch (e) {
+      setWalletError('Could not initiate bank connection. Check server.');
+    }
+  }
+
+  async function confirmPlaidConnect() {
+    setShowPlaidModal(false);
+    setSyncingPlaid(true);
+    try {
+      // Exchange with a mock token (simulator) or real public_token from Plaid Link callback
+      const exchResp = await fetch(`${BACKEND_URL}/api/plaid/exchange-public-token`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ public_token: 'mock_public_token_simulator' }),
+      });
+      const exchData = await exchResp.json();
+      if (exchData.success) {
+        await fetchWalletStatus();
+        await fetchPlaidBalances();
+      }
+    } catch (e) {
+      setWalletError('Connection failed. Please try again.');
+    } finally {
+      setSyncingPlaid(false);
+    }
+  }
+
+  async function disconnectPlaidAccount() {
+    if (!confirm('Disconnect your Capital One account? Synced balances will be removed.')) return;
+    setSyncingPlaid(true);
+    try {
+      await fetch(`${BACKEND_URL}/api/plaid/disconnect`, { method: 'DELETE', headers: authHeaders() });
+      setPlaidBalances([]);
+      await fetchWalletStatus();
+    } finally {
+      setSyncingPlaid(false);
+    }
+  }
+
+  async function confirmAwConnect() {
+    setShowAwModal(false);
+    setSyncingAW(true);
+    try {
+      const resp = await fetch(`${BACKEND_URL}/api/awardwallet/connect`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ aw_user_id: null }), // null → server generates mock ref
+      });
+      const data = await resp.json();
+      if (data.success) {
+        await fetchWalletStatus();
+        await fetchAwBalances();
+      }
+    } catch (e) {
+      setWalletError('Loyalty connection failed. Please try again.');
+    } finally {
+      setSyncingAW(false);
+    }
+  }
+
+  async function disconnectAwAccount() {
+    if (!confirm('Disconnect your Delta SkyMiles account? Synced balances will be removed.')) return;
+    setSyncingAW(true);
+    try {
+      await fetch(`${BACKEND_URL}/api/awardwallet/disconnect`, { method: 'DELETE', headers: authHeaders() });
+      setAwBalances([]);
+      await fetchWalletStatus();
+    } finally {
+      setSyncingAW(false);
+    }
+  }
+
+  function formatSyncedAgo(isoStr) {
+    if (!isoStr) return 'never';
+    const diff = Date.now() - new Date(isoStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1)  return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24)  return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  }
+  // ── End Wallet state ─────────────────────────────────────────────────────
   
   const terminalEndRef = useRef(null);
 
@@ -1400,6 +1734,328 @@ export default function App() {
           <section className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-in fade-in duration-300">
             {/* Left Column: Credit Card Wallet (2 cols wide) */}
             <div className="lg:col-span-2 space-y-6">
+
+              {/* ── SYNCED REWARDS & LOYALTIES PANEL ─────────────────────── */}
+              <div className="glass-card p-5 space-y-4 border-indigo-500/10">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-base font-extrabold font-heading text-white flex items-center gap-2">
+                      🪙 My Synced Rewards &amp; Loyalties
+                    </h2>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Connect your accounts to auto-pull live point balances for deal calculations.
+                    </p>
+                  </div>
+                  {(walletStatus.plaid?.simulatorMode || walletStatus.awardwallet?.simulatorMode) && (
+                    <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-amber-950/40 border border-amber-700/40 text-amber-400">
+                      Simulator Active
+                    </span>
+                  )}
+                </div>
+
+                {walletError && (
+                  <div className="text-xs text-rose-400 bg-rose-950/20 border border-rose-800/30 rounded px-3 py-2">
+                    {walletError}
+                  </div>
+                )}
+
+                {/* Capital One Venture X — Plaid */}
+                <div className={`rounded-xl border p-4 flex items-center justify-between gap-4 transition-all ${
+                  walletStatus.plaid?.connected
+                    ? 'border-emerald-700/40 bg-emerald-950/10'
+                    : 'border-slate-700/40 bg-slate-900/30'
+                }`}>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-base flex-shrink-0 ${
+                      walletStatus.plaid?.connected ? 'bg-emerald-900/40' : 'bg-slate-800/60'
+                    }`}>
+                      💳
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-bold text-white font-heading truncate">Capital One Venture X</div>
+                      <div className="text-[10px] text-slate-400 truncate">
+                        {walletStatus.plaid?.connected
+                          ? `Linked via ${walletStatus.plaid.institution || 'Capital One'}`
+                          : 'Capital One Miles · Plaid Sync'}
+                      </div>
+                      {plaidBalances.length > 0 && (
+                        <div className="flex items-baseline gap-1.5 mt-1">
+                          <span className="text-lg font-extrabold text-emerald-400 font-heading">
+                            {plaidBalances[0].balance.toLocaleString()}
+                          </span>
+                          <span className="text-[10px] text-slate-400">{plaidBalances[0].balanceLabel}</span>
+                          <span className="text-[9px] text-slate-500 ml-1">
+                            ≈ ${Math.round(plaidBalances[0].balance * 0.018).toLocaleString()} value
+                          </span>
+                        </div>
+                      )}
+                      {plaidBalances[0]?.lastSyncedAt && (
+                        <div className="text-[9px] text-slate-500 mt-0.5">
+                          Synced {formatSyncedAgo(plaidBalances[0].lastSyncedAt)}
+                          {plaidBalances[0].stale && <span className="text-amber-500 ml-1">(stale)</span>}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {walletStatus.plaid?.connected ? (
+                      <>
+                        <button
+                          onClick={fetchPlaidBalances}
+                          disabled={syncingPlaid}
+                          className="px-2.5 py-1 rounded text-[10px] font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-all disabled:opacity-50"
+                        >
+                          {syncingPlaid ? '⟳' : '🔄 Sync'}
+                        </button>
+                        <button
+                          onClick={disconnectPlaidAccount}
+                          disabled={syncingPlaid}
+                          className="px-2.5 py-1 rounded text-[10px] font-bold text-rose-400 hover:text-rose-300 border border-rose-900/40 hover:border-rose-800 transition-all disabled:opacity-50"
+                        >
+                          Unlink
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={openPlaidLink}
+                        disabled={syncingPlaid}
+                        className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-indigo-600 hover:bg-indigo-700 text-white transition-all disabled:opacity-50 shadow-sm"
+                      >
+                        {syncingPlaid ? 'Connecting…' : '＋ Connect'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Delta SkyMiles — AwardWallet (family accounts) */}
+                <div className={`rounded-xl border transition-all ${
+                  walletStatus.awardwallet?.connected
+                    ? 'border-emerald-700/40 bg-emerald-950/10'
+                    : 'border-slate-700/40 bg-slate-900/30'
+                }`}>
+                  {/* Header row */}
+                  <div className="flex items-center justify-between gap-4 p-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-base flex-shrink-0 ${
+                        walletStatus.awardwallet?.connected ? 'bg-emerald-900/40' : 'bg-slate-800/60'
+                      }`}>
+                        ✈️
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-sm font-bold text-white font-heading">Delta SkyMiles</div>
+                        <div className="text-[10px] text-slate-400">
+                          {walletStatus.awardwallet?.connected
+                            ? `${awBalances.length} account${awBalances.length !== 1 ? 's' : ''} synced via AwardWallet`
+                            : 'Delta Air Lines · AwardWallet Sync'}
+                        </div>
+                        {awBalances.length > 0 && (
+                          <div className="flex items-baseline gap-1.5 mt-1">
+                            <span className="text-lg font-extrabold text-emerald-400 font-heading">
+                              {awBalances.reduce((s, b) => s + b.balance, 0).toLocaleString()}
+                            </span>
+                            <span className="text-[10px] text-slate-400">miles combined</span>
+                            <span className="text-[9px] text-slate-500 ml-1">
+                              ≈ ${Math.round(awBalances.reduce((s, b) => s + b.balance, 0) * 0.012).toLocaleString()} value
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {walletStatus.awardwallet?.connected ? (
+                        <>
+                          <button
+                            onClick={fetchAwBalances}
+                            disabled={syncingAW}
+                            className="px-2.5 py-1 rounded text-[10px] font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-all disabled:opacity-50"
+                          >
+                            {syncingAW ? '⟳' : '🔄 Sync'}
+                          </button>
+                          <button
+                            onClick={disconnectAwAccount}
+                            disabled={syncingAW}
+                            className="px-2.5 py-1 rounded text-[10px] font-bold text-rose-400 hover:text-rose-300 border border-rose-900/40 hover:border-rose-800 transition-all disabled:opacity-50"
+                          >
+                            Unlink
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => setShowAwModal(true)}
+                          disabled={syncingAW}
+                          className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-indigo-600 hover:bg-indigo-700 text-white transition-all disabled:opacity-50 shadow-sm"
+                        >
+                          {syncingAW ? 'Connecting…' : '＋ Connect'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Per-member account breakdown */}
+                  {awBalances.length > 0 && (
+                    <div className="border-t border-slate-800/60 px-4 pb-3 pt-2 grid grid-cols-2 gap-2">
+                      {awBalances.map((acct) => (
+                        <div key={acct.account_id} className="bg-slate-900/60 rounded-lg px-3 py-2">
+                          <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold mb-0.5">
+                            {acct.member_label || acct.program_name}
+                          </div>
+                          <div className="flex items-baseline gap-1">
+                            <span className="text-sm font-extrabold text-white font-heading">
+                              {acct.balance.toLocaleString()}
+                            </span>
+                            <span className="text-[9px] text-slate-400">miles</span>
+                          </div>
+                          <div className="text-[9px] text-emerald-500 mt-0.5">
+                            ≈ ${Math.round(acct.balance * 0.012).toLocaleString()} value
+                          </div>
+                          {acct.tier && (
+                            <div className="text-[9px] text-indigo-400 mt-0.5">{acct.tier}</div>
+                          )}
+                          <div className="text-[9px] text-slate-600 mt-0.5">{acct.account_number}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Combined value summary bar */}
+                {(plaidBalances.length > 0 || awBalances.length > 0) && (
+                  <div className="flex gap-3 pt-1">
+                    <div className="flex-1 bg-slate-900/60 border border-slate-800/60 rounded-lg px-3 py-2 text-center">
+                      <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Total Card Miles</div>
+                      <div className="text-sm font-extrabold text-white font-heading mt-0.5">
+                        {plaidBalances.reduce((s, b) => s + b.balance, 0).toLocaleString()}
+                      </div>
+                      <div className="text-[9px] text-slate-500">Capital One Miles</div>
+                    </div>
+                    <div className="flex-1 bg-slate-900/60 border border-slate-800/60 rounded-lg px-3 py-2 text-center">
+                      <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Family Delta Miles</div>
+                      <div className="text-sm font-extrabold text-white font-heading mt-0.5">
+                        {awBalances.reduce((s, b) => s + b.balance, 0).toLocaleString()}
+                      </div>
+                      <div className="text-[9px] text-slate-500">{awBalances.length} account{awBalances.length !== 1 ? 's' : ''} combined</div>
+                    </div>
+                    <div className="flex-1 bg-indigo-950/30 border border-indigo-800/30 rounded-lg px-3 py-2 text-center">
+                      <div className="text-[9px] uppercase tracking-wider text-indigo-400 font-bold">Est. Total Value</div>
+                      <div className="text-sm font-extrabold text-indigo-300 font-heading mt-0.5">
+                        ${(
+                          plaidBalances.reduce((s, b) => s + b.balance * 0.018, 0) +
+                          awBalances.reduce((s, b) => s + b.balance * 0.012, 0)
+                        ).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                      </div>
+                      <div className="text-[9px] text-indigo-500">at standard valuations</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+              {/* ── END SYNCED REWARDS PANEL ──────────────────────────────── */}
+
+              {/* Plaid Link Modal — simulator overlay */}
+              {showPlaidModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
+                  <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
+                    <div className="bg-indigo-600 px-5 py-4 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-white font-bold text-sm">🔒 Connect with Plaid</span>
+                      </div>
+                      <button onClick={() => setShowPlaidModal(false)} className="text-indigo-200 hover:text-white text-lg">×</button>
+                    </div>
+                    <div className="p-5 space-y-4">
+                      <div className="text-center">
+                        <div className="text-2xl mb-2">🏦</div>
+                        <p className="text-sm font-bold text-white">Capital One</p>
+                        <p className="text-xs text-slate-400 mt-1">
+                          Securely link your Capital One Venture X to sync your miles balance.
+                          Your credentials are never shared with AeroFamily.
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <input
+                          type="text"
+                          placeholder="Username"
+                          className="form-control text-xs w-full"
+                          autoComplete="off"
+                          readOnly
+                          value="••••••••••"
+                        />
+                        <input
+                          type="password"
+                          placeholder="Password"
+                          className="form-control text-xs w-full"
+                          autoComplete="off"
+                          readOnly
+                          value="••••••••"
+                        />
+                      </div>
+                      <div className="bg-amber-950/30 border border-amber-800/30 rounded-lg px-3 py-2 text-[10px] text-amber-400">
+                        ⚡ Simulator Mode — click Connect to activate mock sync with 75,000 Capital One Miles.
+                      </div>
+                      <button
+                        onClick={confirmPlaidConnect}
+                        className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold transition-all"
+                      >
+                        Connect Capital One
+                      </button>
+                      <p className="text-[9px] text-slate-500 text-center">
+                        Bank-level 256-bit AES encryption · Zero credential storage
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* AwardWallet Modal */}
+              {showAwModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
+                  <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
+                    <div className="bg-red-700 px-5 py-4 flex items-center justify-between">
+                      <span className="text-white font-bold text-sm">✈️ Connect with AwardWallet</span>
+                      <button onClick={() => setShowAwModal(false)} className="text-red-200 hover:text-white text-lg">×</button>
+                    </div>
+                    <div className="p-5 space-y-4">
+                      <div className="text-center">
+                        <div className="text-2xl mb-2">🔴</div>
+                        <p className="text-sm font-bold text-white">Delta SkyMiles</p>
+                        <p className="text-xs text-slate-400 mt-1">
+                          AwardWallet securely tracks your Delta loyalty balance.
+                          Your SkyMiles number is stored in AwardWallet's encrypted vault.
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <input
+                          type="text"
+                          placeholder="Delta SkyMiles Number"
+                          className="form-control text-xs w-full"
+                          readOnly
+                          value="••••••••7823"
+                        />
+                        <input
+                          type="password"
+                          placeholder="SkyMiles PIN"
+                          className="form-control text-xs w-full"
+                          readOnly
+                          value="••••"
+                        />
+                      </div>
+                      <div className="bg-amber-950/30 border border-amber-800/30 rounded-lg px-3 py-2 text-[10px] text-amber-400">
+                        ⚡ Simulator Mode — syncs your account (182,490 miles) + spouse's account (124,000 miles).
+                      </div>
+                      <button
+                        onClick={confirmAwConnect}
+                        className="w-full py-2.5 rounded-lg bg-red-700 hover:bg-red-600 text-white text-sm font-bold transition-all"
+                      >
+                        Connect Delta SkyMiles
+                      </button>
+                      <p className="text-[9px] text-slate-500 text-center">
+                        Powered by AwardWallet · Credentials encrypted at rest
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <h2 className="text-xl font-extrabold font-heading text-white">💳 My Travel Credit Card Wallet</h2>
                 <p className="text-xs text-slate-400 mt-1">Select the credit cards you own to automatically calculate reward points and select optimal payment strategies for flight deals.</p>
@@ -1859,6 +2515,16 @@ export default function App() {
                   </span>
                   <span>{selectedDeal.longLayoverWarning}</span>
                 </div>
+              )}
+
+              {/* Delta Award Search */}
+              {awBalances.length > 0 && (
+                <DeltaAwardSearchPanel
+                  deal={selectedDeal}
+                  awBalances={awBalances}
+                  backendUrl={BACKEND_URL}
+                  authHeaders={authHeaders()}
+                />
               )}
 
               {/* Card Wallet Recommender */}

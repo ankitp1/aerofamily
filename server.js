@@ -10,12 +10,28 @@ import admin from 'firebase-admin';
 import * as functions from 'firebase-functions';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import fs from 'fs/promises';
-import { 
-  sendWhatsAppText, 
-  sendWhatsAppQuickReplies, 
-  sendWhatsAppListMenu, 
-  sendWhatsAppVerificationCode 
+import {
+  sendWhatsAppText,
+  sendWhatsAppQuickReplies,
+  sendWhatsAppListMenu,
+  sendWhatsAppVerificationCode
 } from './whatsappService.js';
+import {
+  createLinkToken,
+  exchangePublicToken,
+  getPlaidBalances,
+  disconnectPlaid,
+  SIMULATOR_MODE as isPlaidSimulator,
+} from './plaidService.js';
+import { searchDeltaAwards } from './deltaAwardSearch.js';
+import {
+  connectAwardWalletAccount,
+  getAwardWalletBalances,
+  disconnectAwardWallet,
+  computeAwardAffordability,
+  AW_SIMULATOR_MODE,
+} from './awardWalletService.js';
+import { readFile } from 'fs/promises';
 
 // Load environmental variables
 dotenv.config();
@@ -407,6 +423,177 @@ app.post('/api/research', async (req, res) => {
   } catch (error) {
     console.error("Research route error:", error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ----------------------------------------------------
+// WALLET: PLAID & AWARDWALLET INTEGRATION ENDPOINTS
+// ----------------------------------------------------
+
+// Helper: load loyalty_programs.json once (cached in memory)
+let _loyaltyPrograms = null;
+async function getLoyaltyPrograms() {
+  if (_loyaltyPrograms) return _loyaltyPrograms;
+  try {
+    const raw = await readFile(path.join(__dirname, 'data', 'loyalty_programs.json'), 'utf8');
+    _loyaltyPrograms = JSON.parse(raw);
+  } catch (_) {
+    _loyaltyPrograms = {};
+  }
+  return _loyaltyPrograms;
+}
+
+// GET /api/wallet/status — returns connection status + simulator flags for the UI
+app.get('/api/wallet/status', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
+  try {
+    const profile = await getDbDoc('profiles', userId, {});
+    const wallet  = profile?.wallet || {};
+    res.json({
+      plaid: {
+        connected:     !!wallet.plaid,
+        institution:   wallet.plaid?.institution || null,
+        linkedAt:      wallet.plaid?.linkedAt || null,
+        simulatorMode: isPlaidSimulator(),
+      },
+      awardwallet: {
+        connected:     !!wallet.awardwallet,
+        connectedAt:   wallet.awardwallet?.connectedAt || null,
+        simulatorMode: AW_SIMULATOR_MODE,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/plaid/create-link-token — initialise Plaid Link on the front end
+app.post('/api/plaid/create-link-token', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
+  try {
+    const result = await createLinkToken(userId);
+    res.json(result);
+  } catch (err) {
+    console.error('[Plaid] create-link-token error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/plaid/exchange-public-token — swap Link public_token for access_token
+app.post('/api/plaid/exchange-public-token', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
+  const { public_token } = req.body;
+  if (!public_token) return res.status(400).json({ error: 'public_token required' });
+
+  try {
+    const result = await exchangePublicToken(userId, public_token, db);
+    res.json(result);
+  } catch (err) {
+    console.error('[Plaid] exchange-public-token error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/plaid/balances — fetch credit card reward balances
+app.get('/api/plaid/balances', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
+  try {
+    const balances = await getPlaidBalances(userId, db);
+    res.json({ balances, simulatorMode: isPlaidSimulator() });
+  } catch (err) {
+    console.error('[Plaid] balances error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/plaid/disconnect — unlink the connected bank account
+app.delete('/api/plaid/disconnect', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
+  try {
+    await disconnectPlaid(userId, db);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/awardwallet/connect — save AwardWallet user reference after OAuth
+app.post('/api/awardwallet/connect', async (req, res) => {
+  const userId    = req.user ? req.user.id : 'guest';
+  const userEmail = req.user ? req.user.email : null;
+  const { aw_user_id } = req.body;
+  const awUserId = aw_user_id || `mock_aw_${userId}_${Date.now()}`;
+
+  try {
+    const result = await connectAwardWalletAccount(userId, awUserId, db, userEmail);
+    res.json(result);
+  } catch (err) {
+    console.error('[AwardWallet] connect error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/awardwallet/balances — fetch airline/hotel loyalty mile balances
+app.get('/api/awardwallet/balances', async (req, res) => {
+  const userId    = req.user ? req.user.id : 'guest';
+  const userEmail = req.user ? req.user.email : null;
+  try {
+    const balances  = await getAwardWalletBalances(userId, db, userEmail);
+    const loyaltyPg = await getLoyaltyPrograms();
+    res.json({ balances, simulatorMode: AW_SIMULATOR_MODE(), programs: loyaltyPg });
+  } catch (err) {
+    console.error('[AwardWallet] balances error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/delta/award-search?origin=ATL&destination=JFK&cabin=economy&days=90
+// Searches Delta SkyMiles award pricing for a route via seats.aero (or Gemini fallback)
+app.get('/api/delta/award-search', async (req, res) => {
+  const { origin, destination, cabin, days } = req.query;
+  if (!origin || !destination) {
+    return res.status(400).json({ error: 'origin and destination are required' });
+  }
+  try {
+    const result = await searchDeltaAwards(
+      origin.toUpperCase(),
+      destination.toUpperCase(),
+      cabin || null,
+      parseInt(days) || 90
+    );
+    res.json(result);
+  } catch (err) {
+    console.error('[Delta Award Search] route error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/awardwallet/disconnect — unlink AwardWallet account
+app.delete('/api/awardwallet/disconnect', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
+  try {
+    await disconnectAwardWallet(userId, db);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/wallet/affordability — given a deal price, compute award coverage
+app.post('/api/wallet/affordability', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
+  const { dealPrice, passengers } = req.body;
+  if (!dealPrice) return res.status(400).json({ error: 'dealPrice required' });
+
+  try {
+    const userEmail  = req.user ? req.user.email : null;
+    const totalCash  = dealPrice * (passengers || 1);
+    const loyaltyBal = await getAwardWalletBalances(userId, db, userEmail);
+    const loyaltyPg  = await getLoyaltyPrograms();
+    const report     = computeAwardAffordability(totalCash, loyaltyBal, loyaltyPg);
+    res.json({ totalCash, report });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
