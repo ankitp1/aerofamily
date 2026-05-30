@@ -207,7 +207,7 @@ export default function App() {
   
   const terminalEndRef = useRef(null);
 
-  const getDynamicScanSummary = () => {
+  const getDynamicScanSummary = (activeDealsSet) => {
     // 1. Calculate time since last scan
     let timeAgoText = "recently";
     if (logs && logs.length > 0 && logs[0].timestamp) {
@@ -230,10 +230,10 @@ export default function App() {
     }
 
     // 2. Count live deals
-    const liveDealsCount = deals.length;
+    const liveDealsCount = activeDealsSet.length;
 
     // 3. Count expiring deals
-    const expiringSoonCount = deals.filter(deal => {
+    const expiringSoonCount = activeDealsSet.filter(deal => {
       const window = (deal.bookingWindow || '').toLowerCase();
       return window.includes('48 hour') || window.includes('24 hour') || window.includes('today') || window.includes('minute') || window.includes('limited');
     }).length;
@@ -678,7 +678,13 @@ export default function App() {
     );
   }
 
-  const { timeAgoText, liveDealsCount, expiringText, departureAirport, nextScanText, newDealsCount } = getDynamicScanSummary();
+  const passengers = profile.familyProfile.adults + profile.familyProfile.kids;
+  const filteredDeals = deals.filter(deal => {
+    const totalCost = deal.dealPrice * passengers;
+    return totalCost <= profile.familyProfile.budget;
+  });
+
+  const { timeAgoText, liveDealsCount, expiringText, departureAirport, nextScanText, newDealsCount } = getDynamicScanSummary(filteredDeals);
 
   return (
     <div className="min-h-screen pb-28 bg-[#080a0f]">
@@ -699,8 +705,6 @@ export default function App() {
         <div className="flex items-center gap-6 text-xs text-[#94a3b8]">
           <div className="hidden sm:flex items-center gap-2 font-semibold">
             <span>Family of {profile.familyProfile.adults + profile.familyProfile.kids}</span>
-            <span className="text-slate-800">•</span>
-            <span>${profile.familyProfile.budget.toLocaleString()} budget</span>
           </div>
           
           <div className="flex items-center gap-2">
@@ -755,9 +759,66 @@ export default function App() {
                   </div>
                   
                   {/* Dynamic description paragraph */}
-                  <p className="text-slate-400 text-sm mt-6 leading-relaxed pretty-paragraph">
-                    The agent scanned <strong className="text-slate-200">15 routes</strong> from {departureAirport} {timeAgoText}. {liveDealsCount} deals are live — {expiringText}.
+                  <p className="text-slate-400 text-xs mt-4 leading-relaxed pretty-paragraph">
+                    The agent scanned <strong className="text-slate-200">15 routes</strong> from {departureAirport} {timeAgoText}. {liveDealsCount} deals are in budget.
                   </p>
+
+                  {/* Family & Budget Interactive Controls */}
+                  <div className="mt-5 space-y-3.5 bg-slate-950/45 p-4 rounded-xl border border-slate-900/80">
+                    <div className="text-[10px] text-indigo-400 font-black uppercase tracking-wider">
+                      ✈️ Family Flight Calculator
+                    </div>
+                    
+                    {/* Passengers Tweak */}
+                    <div className="grid grid-cols-2 gap-3 mt-1 text-xs">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-slate-500 font-bold uppercase tracking-wider text-[9px]">👨 Adults</span>
+                        <div className="flex items-center gap-2">
+                          <button 
+                            onClick={() => updateFamilyDetails('adults', Math.max(1, profile.familyProfile.adults - 1))}
+                            className="w-6 h-6 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 flex items-center justify-center font-bold hover:bg-slate-800 cursor-pointer text-xs"
+                          >-</button>
+                          <span className="text-white font-bold">{profile.familyProfile.adults}</span>
+                          <button 
+                            onClick={() => updateFamilyDetails('adults', profile.familyProfile.adults + 1)}
+                            className="w-6 h-6 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 flex items-center justify-center font-bold hover:bg-slate-800 cursor-pointer text-xs"
+                          >+</button>
+                        </div>
+                      </div>
+                      
+                      <div className="flex flex-col gap-1">
+                        <span className="text-slate-500 font-bold uppercase tracking-wider text-[9px]">👶 Kids</span>
+                        <div className="flex items-center gap-2">
+                          <button 
+                            onClick={() => updateFamilyDetails('kids', Math.max(0, profile.familyProfile.kids - 1))}
+                            className="w-6 h-6 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 flex items-center justify-center font-bold hover:bg-slate-800 cursor-pointer text-xs"
+                          >-</button>
+                          <span className="text-white font-bold">{profile.familyProfile.kids}</span>
+                          <button 
+                            onClick={() => updateFamilyDetails('kids', profile.familyProfile.kids + 1)}
+                            className="w-6 h-6 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 flex items-center justify-center font-bold hover:bg-slate-800 cursor-pointer text-xs"
+                          >+</button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Flight Budget Slider */}
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-slate-500 font-bold uppercase tracking-wider text-[9px]">💰 Flight Budget (Total Family)</span>
+                        <span className="text-emerald-400 font-mono font-bold">${profile.familyProfile.budget.toLocaleString()}</span>
+                      </div>
+                      <input 
+                        type="range" 
+                        min="500" 
+                        max="8000" 
+                        step="100"
+                        value={profile.familyProfile.budget} 
+                        onChange={(e) => updateFamilyDetails('budget', parseInt(e.target.value) || 500)}
+                        className="w-full accent-[#5f5af6] cursor-pointer"
+                      />
+                    </div>
+                  </div>
                 </div>
                 
                 <div>
@@ -839,9 +900,11 @@ export default function App() {
                       { code: 'NAS', x: 560, y: 120, cx: 485, cy: 125 },
                       { code: 'PUJ', x: 670, y: 110, cx: 535, cy: 115 }
                     ].map(node => {
-                      const isActive = hoveredAirport === node.code || (!hoveredAirport && node.isBest);
+                      const matchDeal = deals.find(d => d.destinationAirport === node.code);
+                      const isWithinBudget = matchDeal ? (matchDeal.dealPrice * passengers <= profile.familyProfile.budget) : true;
+                      const isActive = isWithinBudget && (hoveredAirport === node.code || (!hoveredAirport && node.isBest));
                       return (
-                        <g key={`path-group-${node.code}`}>
+                        <g key={`path-group-${node.code}`} opacity={isWithinBudget ? 1 : 0.15}>
                           {/* Shadow glow line for active curve */}
                           {isActive && (
                             <path
@@ -884,19 +947,22 @@ export default function App() {
                       { code: 'NAS', x: 560, y: 120, price: '$298' },
                       { code: 'PUJ', x: 670, y: 110, price: '$347' }
                     ].map(node => {
-                      const isActive = hoveredAirport === node.code || (!hoveredAirport && node.isBest);
+                      const matchDeal = deals.find(d => d.destinationAirport === node.code);
+                      const isWithinBudget = matchDeal ? (matchDeal.dealPrice * passengers <= profile.familyProfile.budget) : true;
+                      const isActive = isWithinBudget && (hoveredAirport === node.code || (!hoveredAirport && node.isBest));
                       const displayColor = node.isBest ? '#fbbf24' : '#6366f1';
                       
                       return (
                         <g 
                           key={`node-${node.code}`}
-                          onMouseEnter={() => setHoveredAirport(node.code)}
-                          onMouseLeave={() => setHoveredAirport(null)}
+                          onMouseEnter={() => isWithinBudget && setHoveredAirport(node.code)}
+                          onMouseLeave={() => isWithinBudget && setHoveredAirport(null)}
                           onClick={() => {
-                            const match = deals.find(d => d.destinationAirport === node.code);
-                            if (match) setSelectedDeal(match);
+                            if (!isWithinBudget) return;
+                            if (matchDeal) setSelectedDeal(matchDeal);
                           }}
-                          className="cursor-pointer"
+                          className={isWithinBudget ? "cursor-pointer" : "cursor-not-allowed"}
+                          opacity={isWithinBudget ? 1 : 0.25}
                         >
                           {/* Glow background behind SJU/active nodes */}
                           {isActive && (
@@ -929,7 +995,7 @@ export default function App() {
                           <text 
                             x={node.x} 
                             y={node.y - 12} 
-                            fill="#64748b" 
+                            fill={isWithinBudget ? "#64748b" : "#475569"} 
                             fontSize="9" 
                             fontWeight="bold" 
                             textAnchor="middle" 
@@ -941,13 +1007,13 @@ export default function App() {
                           <text 
                             x={node.x} 
                             y={node.y + 18} 
-                            fill={isActive ? displayColor : '#94a3b8'} 
+                            fill={isWithinBudget ? (isActive ? displayColor : '#94a3b8') : '#ef4444'} 
                             fontSize="10" 
                             fontWeight="800" 
                             textAnchor="middle" 
                             fontFamily="Outfit"
                           >
-                            {node.price}
+                            {isWithinBudget ? node.price : 'Over Budget'}
                           </text>
                         </g>
                       );
@@ -977,15 +1043,15 @@ export default function App() {
                 </button>
               </div>
 
-              {deals.length === 0 ? (
-                <div className="glass-card p-12 text-center space-y-4">
+              {filteredDeals.length === 0 ? (
+                <div className="glass-card p-12 text-center space-y-4 w-full">
                   <div className="text-4xl">📭</div>
-                  <h3 className="text-xl font-bold font-heading">No Deals Found</h3>
-                  <p className="text-slate-400 max-w-sm mx-auto">Click "Scan for Fare Drops" above to populate the interactive map and live deal cards.</p>
+                  <h3 className="text-xl font-bold font-heading">No Deals in Budget</h3>
+                  <p className="text-slate-400 max-w-sm mx-auto">Try raising your flight budget slider on the left sidebar to see more scanned drops.</p>
                 </div>
               ) : (
                 <div className="flex gap-4 overflow-x-auto pb-4 pt-1 scrollbar-none snap-x snap-mandatory">
-                  {deals.map(deal => {
+                  {filteredDeals.map(deal => {
                     const isSJU = deal.destinationAirport === 'SJU';
                     const isMDE = deal.destinationAirport === 'MDE';
                     const isNAS = deal.destinationAirport === 'NAS';
