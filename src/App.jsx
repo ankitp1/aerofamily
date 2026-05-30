@@ -207,6 +207,66 @@ export default function App() {
   
   const terminalEndRef = useRef(null);
 
+  const getDynamicScanSummary = () => {
+    // 1. Calculate time since last scan
+    let timeAgoText = "recently";
+    if (logs && logs.length > 0 && logs[0].timestamp) {
+      const scanTime = new Date(logs[0].timestamp);
+      const now = new Date();
+      const diffMs = now - scanTime;
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMins / 60);
+      const diffDays = Math.floor(diffHours / 24);
+      
+      if (diffMins < 1) {
+        timeAgoText = "just now";
+      } else if (diffMins < 60) {
+        timeAgoText = `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
+      } else if (diffHours < 24) {
+        timeAgoText = `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+      } else {
+        timeAgoText = `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+      }
+    }
+
+    // 2. Count live deals
+    const liveDealsCount = deals.length;
+
+    // 3. Count expiring deals
+    const expiringSoonCount = deals.filter(deal => {
+      const window = (deal.bookingWindow || '').toLowerCase();
+      return window.includes('48 hour') || window.includes('24 hour') || window.includes('today') || window.includes('minute') || window.includes('limited');
+    }).length;
+
+    const expiringText = expiringSoonCount > 0 
+      ? `one expires soon` 
+      : "none expire immediately";
+
+    const departureAirport = profile.airports && profile.airports[0] ? profile.airports[0].code : 'ATL';
+
+    // 4. Calculate next scan schedule time (12:00 PM or 12:00 AM)
+    const now = new Date();
+    let nextScanText = "12:00 AM";
+    const currentHour = now.getHours();
+    if (currentHour < 12) {
+      nextScanText = "12:00 PM";
+    } else {
+      nextScanText = "12:00 AM";
+    }
+
+    // 5. New deals found in latest scan
+    const newDealsCount = logs && logs.length > 0 ? (logs[0].dealsFound ?? liveDealsCount) : liveDealsCount;
+
+    return {
+      timeAgoText,
+      liveDealsCount,
+      expiringText,
+      departureAirport,
+      nextScanText,
+      newDealsCount
+    };
+  };
+
   // Fetch index items when token or login status changes
   useEffect(() => {
     fetchDeals();
@@ -618,6 +678,8 @@ export default function App() {
     );
   }
 
+  const { timeAgoText, liveDealsCount, expiringText, departureAirport, nextScanText, newDealsCount } = getDynamicScanSummary();
+
   return (
     <div className="min-h-screen pb-28 bg-[#080a0f]">
       {/* HEADER SECTION */}
@@ -685,7 +747,7 @@ export default function App() {
                   
                   {/* Large Stat */}
                   <div className="flex items-baseline gap-3 mt-4">
-                    <span className="text-white text-8xl font-black font-heading leading-none">3</span>
+                    <span className="text-white text-8xl font-black font-heading leading-none">{newDealsCount}</span>
                     <div className="flex flex-col">
                       <span className="text-emerald-400 font-extrabold text-sm uppercase tracking-wider leading-none">new</span>
                       <span className="text-emerald-400 font-extrabold text-sm uppercase tracking-wider leading-none mt-1">deals</span>
@@ -694,7 +756,7 @@ export default function App() {
                   
                   {/* Dynamic description paragraph */}
                   <p className="text-slate-400 text-sm mt-6 leading-relaxed pretty-paragraph">
-                    The agent scanned <strong className="text-slate-200">15 routes</strong> from {profile.airports[0]?.code || 'ATL'} 2 hours ago. {deals.length || 6} deals are live — one expires within 48 hours.
+                    The agent scanned <strong className="text-slate-200">15 routes</strong> from {departureAirport} {timeAgoText}. {liveDealsCount} deals are live — {expiringText}.
                   </p>
                 </div>
                 
@@ -705,7 +767,7 @@ export default function App() {
                   <div className="grid grid-cols-3 gap-2">
                     <div>
                       <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">ACTIVE</div>
-                      <div className="text-white text-2xl font-black font-heading mt-1">{deals.length || 6}</div>
+                      <div className="text-white text-2xl font-black font-heading mt-1">{liveDealsCount}</div>
                     </div>
                     <div>
                       <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">BEST SAVE</div>
@@ -715,7 +777,7 @@ export default function App() {
                     </div>
                     <div>
                       <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">NEXT SCAN</div>
-                      <div className="text-white text-2xl font-black font-heading mt-1">8:00 PM</div>
+                      <div className="text-white text-2xl font-black font-heading mt-1">{nextScanText}</div>
                     </div>
                   </div>
 
