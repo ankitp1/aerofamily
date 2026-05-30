@@ -224,6 +224,19 @@ export default function App() {
   
   // Custom mock email input state for Simulated Dev Login
   const [devEmail, setDevEmail] = useState('');
+
+  // WhatsApp Alerts Settings State
+  const [waPhoneNumber, setWaPhoneNumber] = useState('');
+  const [waOptInAlerts, setWaOptInAlerts] = useState(true);
+  const [waRegistering, setWaRegistering] = useState(false);
+  const [waSuccessMsg, setWaSuccessMsg] = useState('');
+
+  useEffect(() => {
+    if (profile && profile.whatsapp) {
+      setWaPhoneNumber(profile.whatsapp.phoneNumber || '');
+      setWaOptInAlerts(profile.whatsapp.optInAlerts !== false);
+    }
+  }, [profile]);
   
   const terminalEndRef = useRef(null);
 
@@ -472,6 +485,30 @@ export default function App() {
       }
     } catch (err) {
       console.error("Error saving profile:", err);
+    }
+  };
+
+  const registerWhatsApp = async () => {
+    if (!waPhoneNumber) return;
+    setWaRegistering(true);
+    setWaSuccessMsg('');
+    try {
+      const res = await handleApiPost('/api/profile/whatsapp', {
+        phoneNumber: waPhoneNumber,
+        optInAlerts: waOptInAlerts
+      });
+      if (res.success) {
+        setProfile({
+          ...profile,
+          whatsapp: res.whatsapp
+        });
+        setWaSuccessMsg('🎉 Successfully verified instantly!');
+        setTimeout(() => setWaSuccessMsg(''), 5000);
+      }
+    } catch (err) {
+      console.error("Error registering WhatsApp:", err);
+    } finally {
+      setWaRegistering(false);
     }
   };
 
@@ -1551,6 +1588,77 @@ export default function App() {
                   <div className="font-bold text-[9px] uppercase text-indigo-400 tracking-wider">📅 Background Daemon Schedule</div>
                   <div>• Frequency: Twice daily (every 12 hours)</div>
                   <div>• Next scan: Automatic background interval armed</div>
+                </div>
+              </div>
+
+              {/* WhatsApp Alerts Setup Card */}
+              <div className="glass-card p-5 space-y-4">
+                <h3 className="text-lg font-bold font-heading text-white border-b border-slate-800 pb-2 flex items-center justify-between">
+                  <span className="flex items-center gap-2">📲 WhatsApp Alerts</span>
+                  {profile.whatsapp?.verified && (
+                    <span className="badge badge-success text-[8px] tracking-widest font-extrabold px-2 py-0.5 animate-pulse">ACTIVE</span>
+                  )}
+                </h3>
+                
+                <p className="text-xs text-slate-400 leading-relaxed pretty-paragraph">
+                  Get real-time deal alerts and mistake fares sent directly to your phone when prices drop below your family budget limits.
+                </p>
+
+                <div className="space-y-3 pt-1">
+                  <div className="form-group">
+                    <label className="form-label">📞 WhatsApp Phone Number</label>
+                    <div className="flex gap-2">
+                      <select className="form-control text-xs w-[85px] px-1 bg-slate-900 border-slate-800 text-slate-200">
+                        <option value="1">+1 (US)</option>
+                        <option value="44">+44 (UK)</option>
+                        <option value="57">+57 (CO)</option>
+                        <option value="81">+81 (JP)</option>
+                      </select>
+                      <input 
+                        type="tel" 
+                        placeholder="(555) 000-0000" 
+                        value={waPhoneNumber}
+                        onChange={(e) => setWaPhoneNumber(e.target.value)}
+                        className="form-control text-xs flex-1 bg-slate-900 border-slate-800 text-slate-200"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2.5 py-1 select-none">
+                    <input 
+                      type="checkbox" 
+                      id="wa_opt_alerts"
+                      checked={waOptInAlerts}
+                      onChange={(e) => setWaOptInAlerts(e.target.checked)}
+                      className="w-4 h-4 accent-[#5f5af6] cursor-pointer"
+                    />
+                    <label htmlFor="wa_opt_alerts" className="text-xs text-slate-300 font-medium cursor-pointer">
+                      Enable real-time alert notifications
+                    </label>
+                  </div>
+
+                  <button 
+                    onClick={registerWhatsApp}
+                    disabled={waRegistering || !waPhoneNumber}
+                    className="btn btn-primary w-full text-xs py-2 shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-1.5"
+                  >
+                    {waRegistering ? (
+                      <>
+                        <span className="animate-spin text-xs">🔄</span>
+                        <span>SAVING ALERTS...</span>
+                      </>
+                    ) : profile.whatsapp?.verified ? (
+                      '⚡ UPDATE PHONE SETTINGS'
+                    ) : (
+                      '🔔 ACTIVATE INSTANT ALERTS'
+                    )}
+                  </button>
+
+                  {waSuccessMsg && (
+                    <div className="text-[11px] text-emerald-400 font-bold text-center mt-2 animate-bounce">
+                      {waSuccessMsg}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
