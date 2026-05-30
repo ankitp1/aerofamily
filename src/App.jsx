@@ -191,6 +191,21 @@ export default function App() {
   });
 
   const [activeTab, setActiveTab] = useState('deals');
+  const [theme, setTheme] = useState(() => {
+    return localStorage.getItem('aerofamily_theme') || 'dark';
+  });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === 'light') {
+      root.classList.add('light');
+      root.setAttribute('data-theme', 'light');
+    } else {
+      root.classList.remove('light');
+      root.setAttribute('data-theme', 'dark');
+    }
+    localStorage.setItem('aerofamily_theme', theme);
+  }, [theme]);
   const [deals, setDeals] = useState([]);
   const [profile, setProfile] = useState({
     airports: [{ code: "ATL", name: "Hartsfield-Jackson Atlanta (ATL)", type: "biggest" }],
@@ -803,6 +818,13 @@ export default function App() {
           </div>
           <div className="flex items-center gap-3">
             <button 
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              className="flex items-center justify-center w-8 h-8 rounded-full bg-[#131824] hover:bg-[#1a2030] text-indigo-300 border border-indigo-950/60 transition-all cursor-pointer bg-transparent text-sm shadow-md"
+              title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            >
+              {theme === 'dark' ? '☀️' : '🌙'}
+            </button>
+            <button 
               onClick={() => setOnboardingStep(1)}
               className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#131824] hover:bg-[#1a2030] text-indigo-300 border border-indigo-950/60 transition-colors font-bold cursor-pointer bg-transparent text-xs"
             >
@@ -916,7 +938,15 @@ export default function App() {
           </div>
 
           <button 
-            onClick={() => setOnboardingStep(isLoggedIn ? 2 : 1)}
+            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            className="flex items-center justify-center w-8 h-8 rounded-full bg-[#131824] hover:bg-[#1a2030] text-indigo-300 border border-indigo-950/60 transition-all cursor-pointer bg-transparent text-sm"
+            title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+          >
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
+
+          <button 
+            onClick={() => setOnboardingStep(isLoggedIn ? 4 : 1)}
             className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#131824] hover:bg-[#1a2030] text-indigo-300 border border-indigo-950/60 transition-colors font-bold cursor-pointer bg-transparent text-xs"
           >
             <span>🧭</span>
