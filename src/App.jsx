@@ -1006,7 +1006,7 @@ export default function App() {
                   </p>
 
                   {/* Family & Budget Interactive Controls */}
-                  <div className="mt-5 space-y-3.5 bg-slate-950/45 p-4 rounded-xl border border-slate-900/80">
+                  <div className="family-calculator-card mt-5 space-y-3.5 bg-slate-950/45 p-4 rounded-xl border border-slate-900/80">
                     <div className="text-[10px] text-indigo-400 font-black uppercase tracking-wider">
                       ✈️ Family Flight Calculator
                     </div>
@@ -1018,12 +1018,12 @@ export default function App() {
                         <div className="flex items-center gap-2">
                           <button 
                             onClick={() => updateFamilyDetails('adults', Math.max(1, profile.familyProfile.adults - 1))}
-                            className="w-6 h-6 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 flex items-center justify-center font-bold hover:bg-slate-800 cursor-pointer text-xs"
+                            className="family-calculator-btn w-6 h-6 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 flex items-center justify-center font-bold hover:bg-slate-800 cursor-pointer text-xs"
                           >-</button>
                           <span className="text-white font-bold">{profile.familyProfile.adults}</span>
                           <button 
                             onClick={() => updateFamilyDetails('adults', profile.familyProfile.adults + 1)}
-                            className="w-6 h-6 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 flex items-center justify-center font-bold hover:bg-slate-800 cursor-pointer text-xs"
+                            className="family-calculator-btn w-6 h-6 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 flex items-center justify-center font-bold hover:bg-slate-800 cursor-pointer text-xs"
                           >+</button>
                         </div>
                       </div>
@@ -1033,12 +1033,12 @@ export default function App() {
                         <div className="flex items-center gap-2">
                           <button 
                             onClick={() => updateFamilyDetails('kids', Math.max(0, profile.familyProfile.kids - 1))}
-                            className="w-6 h-6 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 flex items-center justify-center font-bold hover:bg-slate-800 cursor-pointer text-xs"
+                            className="family-calculator-btn w-6 h-6 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 flex items-center justify-center font-bold hover:bg-slate-800 cursor-pointer text-xs"
                           >-</button>
                           <span className="text-white font-bold">{profile.familyProfile.kids}</span>
                           <button 
                             onClick={() => updateFamilyDetails('kids', profile.familyProfile.kids + 1)}
-                            className="w-6 h-6 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 flex items-center justify-center font-bold hover:bg-slate-800 cursor-pointer text-xs"
+                            className="family-calculator-btn w-6 h-6 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 flex items-center justify-center font-bold hover:bg-slate-800 cursor-pointer text-xs"
                           >+</button>
                         </div>
                       </div>

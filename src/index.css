@@ -554,3 +554,18 @@
 :root.light svg circle[fill="#161b26"] {
   fill: #e2e8f0 !important;
 }
+
+/* Family Flight Calculator Light Mode Overrides */
+:root.light .family-calculator-card {
+  background-color: rgba(15, 23, 42, 0.03) !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+}
+:root.light .family-calculator-btn {
+  background-color: #ffffff !important;
+  border-color: rgba(15, 23, 42, 0.12) !important;
+  color: var(--color-text-primary) !important;
+}
+:root.light .family-calculator-btn:hover {
+  background-color: #f1f5f9 !important;
+  border-color: rgba(15, 23, 42, 0.25) !important;
+}
