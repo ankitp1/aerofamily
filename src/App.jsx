@@ -275,10 +275,9 @@ export default function App() {
   const handleOnboardingNext = () => {
     setOnboardingStep(prev => {
       const next = prev + 1;
-      if (next === 3) setActiveTab('deals');
-      if (next === 5) setActiveTab('settings');
-      if (next === 6) setActiveTab('settings');
-      if (next > 6) {
+      if (next === 4) setActiveTab('deals');
+      if (next === 7) setActiveTab('settings');
+      if (next > 7) {
         localStorage.setItem('aerofamily_onboarded', 'true');
         return null;
       }
@@ -289,10 +288,8 @@ export default function App() {
   const handleOnboardingPrev = () => {
     setOnboardingStep(prev => {
       const back = Math.max(1, prev - 1);
-      if (back === 1 && isLoggedIn) return prev;
-      if (back === 3 || back === 2 || back === 4) setActiveTab('deals');
-      if (back === 5) setActiveTab('settings');
-      if (back === 6) setActiveTab('settings');
+      if (back === 4 || back === 5 || back === 6) setActiveTab('deals');
+      if (back === 7) setActiveTab('settings');
       return back;
     });
   };
@@ -364,7 +361,7 @@ export default function App() {
       
       localStorage.setItem('aerofamily_user', JSON.stringify(loggedInUser));
       localStorage.setItem('aerofamily_token', idToken);
-      setOnboardingStep(prev => prev === 1 ? 2 : prev);
+      setOnboardingStep(prev => (prev && prev <= 3) ? 4 : prev);
     } catch (e) {
       console.error("Failed to parse Google ID token:", e);
     }
@@ -391,7 +388,7 @@ export default function App() {
     
     localStorage.setItem('aerofamily_user', JSON.stringify(loggedInUser));
     localStorage.setItem('aerofamily_token', mockToken);
-    setOnboardingStep(prev => prev === 1 ? 2 : prev);
+    setOnboardingStep(prev => (prev && prev <= 3) ? 4 : prev);
   };
 
   const handleLogout = () => {
@@ -635,9 +632,166 @@ export default function App() {
     updateFamilyDetails('interests', updatedInterests);
   };
 
+  const renderOnboardingOverlay = () => {
+    if (!onboardingStep) return null;
+    
+    return (
+      <div className="fixed bottom-24 right-6 z-[200] max-w-sm w-[90%] md:w-full animate-in slide-in-from-bottom-8 duration-300 text-left">
+        <div className="bg-[#0b0d13]/95 backdrop-blur-xl border border-indigo-500/30 shadow-2xl rounded-2xl p-5 space-y-4">
+          
+          {/* Step Header */}
+          <div className="flex justify-between items-center">
+            <span className="text-[10px] text-indigo-400 font-extrabold uppercase tracking-widest font-mono">
+              🧭 AeroFamily Tour Guide • Step {onboardingStep} of 7
+            </span>
+            <button 
+              onClick={handleOnboardingSkip}
+              className="text-slate-500 hover:text-slate-300 text-xs font-semibold bg-transparent border-none cursor-pointer"
+            >
+              Skip Tour
+            </button>
+          </div>
+
+          {/* Step Contents */}
+          {onboardingStep === 1 && (
+            <div className="space-y-2">
+              <h3 className="text-white text-base font-extrabold font-heading flex items-center gap-1.5">
+                ✈️ AeroFamily: Autonomous Deal Finder
+              </h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Welcome to AeroFamily! An autonomous family-focused flight intelligence suite that works for your whole family in the background.
+              </p>
+              <ul className="text-xs text-slate-400 space-y-1 pl-4 list-disc">
+                <li><strong>Dynamic Multi-Passenger Math</strong>: Scales fare drops for kids + adults instantly.</li>
+                <li><strong>No More Guesswork</strong>: Filters flight prices based on your customized family budget.</li>
+              </ul>
+            </div>
+          )}
+
+          {onboardingStep === 2 && (
+            <div className="space-y-2">
+              <h3 className="text-white text-base font-extrabold font-heading flex items-center gap-1.5">
+                🧠 Smart Rewards & AI Itineraries
+              </h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                AeroFamily goes beyond basic searches to extract deep value:
+              </p>
+              <ul className="text-xs text-slate-400 space-y-1 pl-4 list-disc">
+                <li><strong>Credit Card Points Optimizer</strong>: Valuates and suggests the absolute best card to pay for your flights.</li>
+                <li><strong>Gemini Deep Research Agent</strong>: Drafts rich, 5-day customized itineraries highlighting safety, activities, and transport!</li>
+              </ul>
+            </div>
+          )}
+
+          {onboardingStep === 3 && (
+            <div className="space-y-2">
+              <h3 className="text-white text-base font-extrabold font-heading flex items-center gap-1.5">
+                🔐 Isolated Sandbox Databases
+              </h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                To guard your cards, search logs, and preferences, all details are isolated securely:
+              </p>
+              {isLoggedIn ? (
+                <div className="bg-[#10b981]/10 border border-[#10b981]/20 rounded-xl p-3 flex items-center gap-2.5 text-xs text-[#10b981] font-bold">
+                  <span>✓</span>
+                  <span>Successfully Authenticated! Click 'Next Step' to enter your dashboard.</span>
+                </div>
+              ) : (
+                <p className="text-xs text-indigo-300 font-medium leading-relaxed">
+                  Please sign in using <strong>Google Auth</strong> or type any sandbox email in the <strong>Dev Sandbox Form</strong> below to enter the dashboard and continue! ➔
+                </p>
+              )}
+            </div>
+          )}
+
+          {onboardingStep === 4 && (
+            <div className="space-y-2">
+              <h3 className="text-white text-base font-extrabold font-heading flex items-center gap-1.5">
+                ✈️ Welcome to the Dashboard!
+              </h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                You've successfully authorized your sandbox profile. This is your Flight Deal Intelligence command center. Let's see how to control it!
+              </p>
+            </div>
+          )}
+
+          {onboardingStep === 5 && (
+            <div className="space-y-2">
+              <h3 className="text-white text-base font-extrabold font-heading flex items-center gap-1.5">
+                💰 Family Budget Calculator
+              </h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Adjust your active family passengers (adults & kids) and set your total flight budget. 
+              </p>
+              <p className="text-xs text-indigo-300 leading-relaxed">
+                AeroFamily automatically multiplies fare drops to calculate family totals and filters out expensive flights instantly!
+              </p>
+            </div>
+          )}
+
+          {onboardingStep === 6 && (
+            <div className="space-y-2">
+              <h3 className="text-white text-base font-extrabold font-heading flex items-center gap-1.5">
+                📡 Flight Coordinate Radar
+              </h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Our interactive SVG flight map connects your origins to major drop points. 
+              </p>
+              <ul className="text-xs text-slate-400 space-y-1 pl-4 list-disc">
+                <li>Hover over nodes to see bezier flight paths.</li>
+                <li>Flights exceeding your family budget automatically fade out and label themselves <strong>Over Budget</strong>!</li>
+              </ul>
+            </div>
+          )}
+
+          {onboardingStep === 7 && (
+            <div className="space-y-2">
+              <h3 className="text-white text-base font-extrabold font-heading flex items-center gap-1.5">
+                ⚙️ Consolidated Settings & Wallet
+              </h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Under the <strong>Settings & Wallet</strong> tab in the bottom nav, you can:
+              </p>
+              <ul className="text-xs text-slate-400 space-y-1 pl-4 list-disc">
+                <li>Whitelist origin departure airports (ATL, JFK, etc.).</li>
+                <li>Select active search engines (Demo, Kiwi, Gemini, Travelpayouts).</li>
+                <li>Toggle credit cards to calculate point multipliers.</li>
+                <li>Review agent console logs (neatly hidden inside the collapsible details accordion!).</li>
+              </ul>
+            </div>
+          )}
+
+          {/* Navigation Buttons */}
+          <div className="flex gap-2.5 pt-2 border-t border-slate-900">
+            {onboardingStep > 1 && (
+              <button 
+                onClick={handleOnboardingPrev}
+                className="btn btn-secondary flex-1 text-xs py-1.5 cursor-pointer leading-none min-h-[36px]"
+              >
+                Back
+              </button>
+            )}
+            <button 
+              disabled={onboardingStep === 3 && !isLoggedIn}
+              onClick={handleOnboardingNext}
+              className="btn btn-primary flex-1 text-xs py-1.5 cursor-pointer leading-none min-h-[36px] shadow-indigo-600/10 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {onboardingStep === 3 && !isLoggedIn 
+                ? 'Sign In Below 🔑' 
+                : onboardingStep === 7 
+                  ? 'Complete Tour 🏁' 
+                  : 'Next Step'}
+            </button>
+          </div>
+
+        </div>
+      </div>
+    );
+  };
+
   if (!isLoggedIn) {
     return (
-      <div className="min-h-screen flex flex-col justify-between pb-12">
+      <div className="min-h-screen flex flex-col justify-between pb-12 bg-[#080a0f] relative overflow-hidden">
         {/* Simple Header */}
         <header className="glass-panel px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -647,12 +801,21 @@ export default function App() {
               <p className="text-[10px] uppercase font-bold tracking-widest text-indigo-400">Agentic Deal Finder</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 bg-slate-900/80 border border-slate-800 px-3 py-1.5 rounded-full text-xs font-semibold">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
-            </span>
-            <span className="text-slate-300">Auth Gate Secured</span>
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => setOnboardingStep(1)}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#131824] hover:bg-[#1a2030] text-indigo-300 border border-indigo-950/60 transition-colors font-bold cursor-pointer bg-transparent text-xs"
+            >
+              <span>🧭</span>
+              <span>Tour Guide</span>
+            </button>
+            <div className="flex items-center gap-2 bg-slate-900/80 border border-slate-800 px-3 py-1.5 rounded-full text-xs font-semibold">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
+              </span>
+              <span className="text-slate-300">Auth Gate Secured</span>
+            </div>
           </div>
         </header>
 
@@ -712,6 +875,8 @@ export default function App() {
         <footer className="text-center text-[10px] text-slate-600 mt-12 font-mono">
           AeroFamily Web App v2.1 • Local Secure Storage Activated
         </footer>
+
+        {renderOnboardingOverlay()}
       </div>
     );
   }
@@ -1694,129 +1859,7 @@ export default function App() {
       </div>
 
       {/* ONBOARDING FLOW GUIDED TOUR OVERLAY */}
-      {onboardingStep && (
-        <div className="fixed bottom-24 right-6 z-[200] max-w-sm w-[90%] md:w-full animate-in slide-in-from-bottom-8 duration-300">
-          <div className="bg-[#0b0d13]/95 backdrop-blur-xl border border-indigo-500/30 shadow-2xl rounded-2xl p-5 space-y-4">
-            
-            {/* Step Header */}
-            <div className="flex justify-between items-center">
-              <span className="text-[10px] text-indigo-400 font-extrabold uppercase tracking-widest font-mono">
-                🧭 AeroFamily Tour Guide • Step {onboardingStep} of 6
-              </span>
-              <button 
-                onClick={handleOnboardingSkip}
-                className="text-slate-500 hover:text-slate-300 text-xs font-semibold bg-transparent border-none cursor-pointer"
-              >
-                Skip Tour
-              </button>
-            </div>
-
-            {/* Step Contents */}
-            {onboardingStep === 1 && (
-              <div className="space-y-2">
-                <h3 className="text-white text-base font-extrabold font-heading flex items-center gap-1.5">
-                  🔐 Gate Auth & Isolation
-                </h3>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  AeroFamily uses isolated collections to protect your travel data. 
-                </p>
-                <ul className="text-xs text-slate-400 space-y-1 pl-4 list-disc">
-                  <li><strong>Google Sign-In</strong> secure profile credentials check.</li>
-                  <li><strong>Dev Sandbox Login</strong> enters simulated environment instantly (no keys required!).</li>
-                </ul>
-              </div>
-            )}
-
-            {onboardingStep === 2 && (
-              <div className="space-y-2">
-                <h3 className="text-white text-base font-extrabold font-heading flex items-center gap-1.5">
-                  ✈️ Welcome to the Dashboard!
-                </h3>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  You've successfully authorized your sandbox profile. This is your Flight Deal Intelligence command center. Let's see how to control it!
-                </p>
-              </div>
-            )}
-
-            {onboardingStep === 3 && (
-              <div className="space-y-2">
-                <h3 className="text-white text-base font-extrabold font-heading flex items-center gap-1.5">
-                  💰 Family Budget Calculator
-                </h3>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Adjust your active family passengers (adults & kids) and set your total flight budget. 
-                </p>
-                <p className="text-xs text-indigo-300 leading-relaxed">
-                  AeroFamily automatically multiplies fare drops to calculate family totals and filters out expensive flights instantly!
-                </p>
-              </div>
-            )}
-
-            {onboardingStep === 4 && (
-              <div className="space-y-2">
-                <h3 className="text-white text-base font-extrabold font-heading flex items-center gap-1.5">
-                  📡 Flight Coordinate Radar
-                </h3>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Our interactive SVG flight map connects your origins to major drop points. 
-                </p>
-                <ul className="text-xs text-slate-400 space-y-1 pl-4 list-disc">
-                  <li>Hover over nodes to see bezier flight paths.</li>
-                  <li>Flights exceeding your family budget automatically fade out and label themselves <strong>Over Budget</strong>!</li>
-                </ul>
-              </div>
-            )}
-
-            {onboardingStep === 5 && (
-              <div className="space-y-2">
-                <h3 className="text-white text-base font-extrabold font-heading flex items-center gap-1.5">
-                  🤖 Agent Setup & Departure Origins
-                </h3>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Under the <strong>Agent Control Panel</strong>, you can:
-                </p>
-                <ul className="text-xs text-slate-400 space-y-1 pl-4 list-disc">
-                  <li>Choose active scan engines (Demo, Kiwi, Gemini, or Travelpayouts).</li>
-                  <li>Whitelist your family's departure IATA codes (like ATL, JFK, or LHR).</li>
-                </ul>
-              </div>
-            )}
-
-            {onboardingStep === 6 && (
-              <div className="space-y-2">
-                <h3 className="text-white text-base font-extrabold font-heading flex items-center gap-1.5">
-                  💳 Points Math & Itinerary Agents
-                </h3>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Under **Card Wallet**, select your premium cards to calculate reward multipliers and optimize transaction card choices.
-                </p>
-                <p className="text-xs text-indigo-300 leading-relaxed">
-                  Click <strong>Research Trip</strong> on any deal to let Gemini compile a detailed 5-day family itinerary customized for your interests!
-                </p>
-              </div>
-            )}
-
-            {/* Navigation Buttons */}
-            <div className="flex gap-2.5 pt-2 border-t border-slate-900">
-              {onboardingStep > 1 && (
-                <button 
-                  onClick={handleOnboardingPrev}
-                  className="btn btn-secondary flex-1 text-xs py-1.5 cursor-pointer leading-none min-h-[36px]"
-                >
-                  Back
-                </button>
-              )}
-              <button 
-                onClick={handleOnboardingNext}
-                className="btn btn-primary flex-1 text-xs py-1.5 cursor-pointer leading-none min-h-[36px] shadow-indigo-600/10"
-              >
-                {onboardingStep === 6 ? 'Complete Tour 🏁' : 'Next Step'}
-              </button>
-            </div>
-
-          </div>
-        </div>
-      )}
+      {renderOnboardingOverlay()}
     </div>
   );
 }
