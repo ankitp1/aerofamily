@@ -341,7 +341,7 @@
 
 /* --- LIGHT MODE TAILWIND OVERRIDES --- */
 :root.light {
-  --color-bg-base: #f1f5f9;
+  --color-bg-base: #f8fafc;
   --color-bg-surface: rgba(255, 255, 255, 0.7);
   --color-bg-surface-opaque: #ffffff;
   --color-bg-surface-hover: rgba(241, 245, 249, 0.9);
@@ -370,6 +370,29 @@
     radial-gradient(circle at 90% 80%, rgba(16, 185, 129, 0.03) 0%, transparent 40%);
 }
 
+/* Base components override */
+:root.light .btn-secondary {
+  background: #ffffff !important;
+  color: var(--color-text-primary) !important;
+  border: 1px solid var(--border-color) !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05) !important;
+}
+:root.light .btn-secondary:hover {
+  background: #f8fafc !important;
+  border-color: var(--border-color-hover) !important;
+}
+
+:root.light .form-control {
+  background: #ffffff !important;
+  color: var(--color-text-primary) !important;
+  border: 1px solid var(--border-color) !important;
+}
+:root.light .form-control:focus {
+  background: #ffffff !important;
+  border-color: var(--color-accent) !important;
+  box-shadow: 0 0 0 2px var(--color-accent-glow) !important;
+}
+
 /* Base utilities override */
 :root.light .bg-\[\#080a0f\] {
   background-color: var(--color-bg-base) !important;
@@ -377,18 +400,42 @@
 :root.light .bg-\[\#0b0d13\] {
   background-color: var(--color-bg-surface-opaque) !important;
 }
+:root.light .bg-\[\#0b0d13\]\/85 {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+}
+:root.light .bg-\[\#0b0d13\]\/95 {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+}
 :root.light .bg-\[\#0c0f16\] {
   background-color: var(--color-bg-surface) !important;
+}
+:root.light .bg-\[\#0c0f16\]\/90 {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+}
+:root.light .bg-\[\#0c0f16\]\/95 {
+  background-color: rgba(255, 255, 255, 0.95) !important;
 }
 :root.light .bg-\[\#0e111a\] {
   background-color: var(--color-bg-surface-opaque) !important;
 }
-:root.light .bg-\[\#131722\] {
+:root.light .bg-\[\#131722\]\/80 {
   background-color: var(--color-bg-base) !important;
+}
+:root.light .bg-slate-900\/80 {
+  background-color: rgba(255, 255, 255, 0.8) !important;
 }
 :root.light .bg-slate-950 {
   background-color: #f8fafc !important;
   color: #0f172a !important;
+}
+:root.light .bg-slate-950\/40 {
+  background-color: rgba(255, 255, 255, 0.4) !important;
+}
+:root.light .bg-slate-950\/60 {
+  background-color: rgba(255, 255, 255, 0.6) !important;
+}
+:root.light .bg-slate-950\/85 {
+  background-color: rgba(255, 255, 255, 0.85) !important;
 }
 :root.light .bg-\[\#131824\] {
   background-color: rgba(79, 70, 229, 0.08) !important;
@@ -397,8 +444,72 @@
 :root.light .bg-\[\#131824\]:hover {
   background-color: rgba(79, 70, 229, 0.12) !important;
 }
+:root.light .bg-indigo-950\/10 {
+  background-color: rgba(79, 70, 229, 0.08) !important;
+}
+:root.light .bg-\[\#10b981\]\/10 {
+  background-color: rgba(5, 150, 105, 0.08) !important;
+}
+:root.light .bg-indigo-600\/10 {
+  background-color: rgba(79, 70, 229, 0.08) !important;
+}
+:root.light .bg-indigo-950\/30 {
+  background-color: rgba(79, 70, 229, 0.08) !important;
+}
+
+/* Borders and lines */
+:root.light .border-slate-800 {
+  border-color: var(--border-color) !important;
+}
+:root.light .border-slate-800\/40 {
+  border-color: var(--border-color) !important;
+}
+:root.light .border-slate-800\/80 {
+  border-color: var(--border-color) !important;
+}
+:root.light .border-slate-900 {
+  border-color: var(--border-color) !important;
+}
+:root.light .border-slate-900\/40 {
+  border-color: var(--border-color) !important;
+}
+:root.light .border-slate-900\/60 {
+  border-color: var(--border-color) !important;
+}
+:root.light .border-\[\#1b1f2e\] {
+  border-color: var(--border-color) !important;
+}
+:root.light .border-\[\#121620\]\/60 {
+  border-color: var(--border-color) !important;
+}
+:root.light .border-indigo-500\/10 {
+  border-color: rgba(79, 70, 229, 0.1) !important;
+}
+:root.light .border-indigo-500\/20 {
+  border-color: rgba(79, 70, 229, 0.15) !important;
+}
+:root.light .border-indigo-500\/30 {
+  border-color: rgba(79, 70, 229, 0.25) !important;
+}
+:root.light .border-indigo-500\/25 {
+  border-color: rgba(79, 70, 229, 0.2) !important;
+}
+:root.light .border-indigo-950\/60 {
+  border-color: rgba(79, 70, 229, 0.15) !important;
+}
+:root.light .border-indigo-900\/30 {
+  border-color: rgba(79, 70, 229, 0.1) !important;
+}
+
+/* Texts and labels */
 :root.light .text-white {
   color: var(--color-text-primary) !important;
+}
+:root.light .text-slate-200 {
+  color: var(--color-text-primary) !important;
+}
+:root.light .text-slate-300 {
+  color: var(--color-text-secondary) !important;
 }
 :root.light .text-slate-400 {
   color: var(--color-text-secondary) !important;
@@ -412,18 +523,8 @@
 :root.light .text-indigo-300 {
   color: var(--color-accent) !important;
 }
-:root.light .border-slate-800 {
-  border-color: var(--border-color) !important;
-}
-:root.light .border-slate-900 {
-  border-color: var(--border-color) !important;
-}
-:root.light .border-\[\#1b1f2e\] {
-  border-color: var(--border-color) !important;
-}
-:root.light .border-\[\#121620\]\/60 {
-  border-color: var(--border-color) !important;
-}
+
+/* Custom UI elements */
 :root.light .glass-panel {
   background: rgba(255, 255, 255, 0.85);
   border-color: var(--border-color) !important;
@@ -431,6 +532,7 @@
 :root.light .glass-card {
   background: var(--color-bg-surface);
   border-color: var(--border-color) !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05) !important;
 }
 :root.light .glass-card:hover {
   border-color: var(--border-color-hover) !important;
@@ -438,6 +540,17 @@
 :root.light .text-emerald-400 {
   color: #059669 !important;
 }
-:root.light .border-indigo-500\/30 {
-  border-color: rgba(79, 70, 229, 0.25) !important;
+
+/* SVG Map Overrides */
+:root.light #flight-grid circle {
+  fill: rgba(0, 0, 0, 0.06) !important;
+}
+:root.light svg text[fill="white"] {
+  fill: var(--color-text-primary) !important;
+}
+:root.light svg circle[stroke="white"] {
+  stroke: var(--color-bg-base) !important;
+}
+:root.light svg circle[fill="#161b26"] {
+  fill: #e2e8f0 !important;
 }
