@@ -341,15 +341,23 @@ export default function App() {
         
         const btnParent = document.getElementById("google-signin-btn");
         if (btnParent) {
+          btnParent.innerHTML = ''; // Clear previous button rendering
           google.accounts.id.renderButton(btnParent, {
-            theme: "filled_dark",
+            theme: theme === 'light' ? 'outline' : 'filled_dark',
             size: "large",
             shape: "pill"
           });
         }
       } catch (e) {
-        console.error("GSI initialization error:", e);
+        console.error("Failed to initialize Google Sign-In:", e);
       }
+    }
+  }, [isLoggedIn, theme]);
+
+  // Auto-start onboarding tour when user is on the login page
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setOnboardingStep(1);
     }
   }, [isLoggedIn]);
 
@@ -857,7 +865,7 @@ export default function App() {
 
             {/* Google Sign In Button Container */}
             <div className="flex flex-col items-center justify-center py-2">
-              <div id="google-signin-btn" className="shadow-lg shadow-slate-950/50"></div>
+              <div id="google-signin-btn"></div>
               <div className="text-[10px] text-slate-500 mt-2 font-mono">Secured by Google Identity Services</div>
             </div>
 
