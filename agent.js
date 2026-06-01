@@ -1,4 +1,28 @@
 // Native global fetch is available in Node 18+
+import { convertSearchData, LocationType, Seat, TripType, Passenger } from 'google-flights-url-generator';
+
+function generateReliableFlightUrl(origin, dest, outDate, retDate) {
+  try {
+    const urlData = convertSearchData({
+      seat: Seat.ECONOMY,
+      passengers: [Passenger.ADULT, Passenger.ADULT, Passenger.CHILD],
+      tripType: TripType.ROUND_TRIP,
+      flights: [{
+        source: { type: LocationType.AIRPORT, name: origin },
+        destination: { type: LocationType.AIRPORT, name: dest },
+        date: outDate,
+      }, {
+        source: { type: LocationType.AIRPORT, name: dest },
+        destination: { type: LocationType.AIRPORT, name: origin },
+        date: retDate,
+      }]
+    });
+    return urlData.URL;
+  } catch (err) {
+    console.error("Failed to generate Protobuf URL:", err);
+    return `https://www.google.com/travel/flights?q=Flights%20from%20${origin}%20to%20${dest}%20on%20${outDate}%20returning%20${retDate}`;
+  }
+}
 
 const AIRPORT_NAMES = {
   "CDG": "Paris, France",
@@ -145,7 +169,7 @@ const DEFAULT_DEMO_DEALS = {
 /**
  * Runs a flight deal scan based on the active engine.
  */
-export async function runScan({ engine, airports, geminiKey, travelpayoutsToken, kiwiApiKey }) {
+export async function runScan({ engine, airports, geminiKey, travelpayoutsToken, kiwiApiKey, familyBudget, passengers = 1 }) {
   const logs = [];
   const timestamp = new Date().toISOString();
   
@@ -175,10 +199,11 @@ export async function runScan({ engine, airports, geminiKey, travelpayoutsToken,
 
     if (engine === 'kiwi') {
       if (!kiwiApiKey) {
-        log("Warning: KIWI_API_KEY is missing. Falling back to Demo Mode.");
-        return await runDemoScan(airports, log, logs, timestamp);
+        log("Warning: KIWI_API_KEY is missing. Falling back to Gemini.");
+        deals = await runGeminiScan(airports, geminiKey, log, familyBudget, passengers);
+      } else {
+        deals = await runKiwiScan(airports, kiwiApiKey, log);
       }
-      deals = await runKiwiScan(airports, kiwiApiKey, log);
     } else if (engine === 'gemini') {
       if (!geminiKey) {
         log("Warning: GEMINI_API_KEY is missing. Falling back to Demo Mode.");
@@ -187,10 +212,11 @@ export async function runScan({ engine, airports, geminiKey, travelpayoutsToken,
       deals = await runGeminiScan(airports, geminiKey, log);
     } else if (engine === 'travelpayouts') {
       if (!travelpayoutsToken) {
-        log("Warning: TRAVELPAYOUTS_TOKEN is missing. Falling back to Demo Mode.");
-        return await runDemoScan(airports, log, logs, timestamp);
+        log("Warning: TRAVELPAYOUTS_TOKEN is missing. Falling back to Gemini.");
+        deals = await runGeminiScan(airports, geminiKey, log, familyBudget, passengers);
+      } else {
+        deals = await runTravelpayoutsScan(airports, travelpayoutsToken, log);
       }
-      deals = await runTravelpayoutsScan(airports, travelpayoutsToken, log);
     } else {
       // Demo/Mock engine
       return await runDemoScan(airports, log, logs, timestamp);
@@ -213,10 +239,13 @@ export async function runScan({ engine, airports, geminiKey, travelpayoutsToken,
       }
     }
 
-    // Add unique IDs to deals
+    // Add unique IDs and provenance stamps so freshness can be checked later
+    const scannedAt = new Date().toISOString();
     deals = verifiedDeals.map((d, index) => ({
       id: `deal-${engine}-${Date.now()}-${index}`,
       ...d,
+      engine,
+      scannedAt,
       savingsPercent: Math.round((1 - (d.dealPrice / d.normalPrice)) * 100)
     }));
 
@@ -234,12 +263,16 @@ export async function runScan({ engine, airports, geminiKey, travelpayoutsToken,
 
   } catch (error) {
     log(`Fatal Scan Error: ${error.message}`);
-    log("Scanning failed. Recovering with Demo Mode fallback so the app remains active.");
-    
+    log("Scanning failed. Recovering with Gemini fallback so the app remains active.");
+
     try {
-      const fallback = await runDemoScan(airports, log, logs, timestamp);
-      fallback.message = `Engine failed: "${error.message}". Recovered via Demo fallback.`;
-      fallback.status = "warning";
+      const fallback = geminiKey
+        ? { ...(await runGeminiScan(airports, geminiKey, log, familyBudget, passengers)), engine: "gemini", timestamp, status: "warning", message: `Engine failed: "${error.message}". Recovered via Gemini fallback.`, logs }
+        : await runDemoScan(airports, log, logs, timestamp);
+      if (!geminiKey) {
+        fallback.message = `Engine failed: "${error.message}". Gemini key missing, recovered via Demo fallback.`;
+        fallback.status = "warning";
+      }
       return fallback;
     } catch (fallbackErr) {
       return {
@@ -280,7 +313,10 @@ async function runDemoScan(airports, log, logs, timestamp) {
         returnDate: deal.returnDate,
         description: deal.description,
         bookingWindow: deal.bookingWindow,
-        bookingLink: `https://www.google.com/travel/flights?q=Flights%20to%20${deal.destinationAirport}%20from%20${airport.code}%20on%20${deal.outboundDate}%20through%20${deal.returnDate}`
+        bookingLink: generateReliableFlightUrl(airport.code, deal.destinationAirport, deal.outboundDate, deal.returnDate),
+        engine: 'demo',
+        scannedAt: new Date().toISOString(),
+        verified: false,
       });
       log(`Found drop: ${airport.code} -> ${deal.destinationAirport} for $${deal.dealPrice} (Norm: $${deal.normalPrice}, Savings: ${Math.round((1 - (deal.dealPrice / deal.normalPrice)) * 100)}%)`);
     }
@@ -301,16 +337,25 @@ async function runDemoScan(airports, log, logs, timestamp) {
 /**
  * Runs a live web search flight deal scan via Gemini + Google Search Grounding.
  */
-async function runGeminiScan(airports, apiKey, log) {
+async function runGeminiScan(airports, apiKey, log, familyBudget, passengers = 1) {
   log("Connecting to Gemini API...");
   log("Preparing search queries with Google Search Grounding.");
-  
-  const airportCodes = airports.map(a => a.code).join(' or ');
-  const prompt = `You are a professional travel agent and flight deal scout. Search the live web (using Google Search) to find current active flight deals, price drops, or error fares departing from these specific airports: ${airportCodes}. 
-Search travel blogs like Going (Scott's Cheap Flights), Secret Flying, Airfarewatchdog, and Flynous.
-Find at least 5 active flight deals. Make sure they are real routes and reasonable prices.
 
-IMPORTANT CRITERIA: Only return flight deals that are either NONSTOP or 1-STOP. Do not return any flight deals with 2 or more stops. 
+  const airportCodes = airports.map(a => a.code).join(' or ');
+
+  // Compute per-person budget ceiling so Gemini targets the right price tier
+  const perPersonBudget = familyBudget && passengers > 0
+    ? Math.floor(familyBudget / passengers)
+    : null;
+  const budgetClause = perPersonBudget
+    ? `The family budget is $${familyBudget} total for ${passengers} passenger${passengers !== 1 ? 's' : ''}, so only return deals where the per-person ticket price is at or below $${perPersonBudget}.`
+    : '';
+
+  const prompt = `You are a professional travel agent and flight deal scout. Search the live web (using Google Search) to find current active flight deals, price drops, or error fares departing from these specific airports: ${airportCodes}.
+Search travel blogs like Going (Scott's Cheap Flights), Secret Flying, Airfarewatchdog, and Flynous.
+Find at least 5 active flight deals. Make sure they are real routes and real prices currently advertised online. ${budgetClause}
+
+IMPORTANT CRITERIA: Only return flight deals that are either NONSTOP or 1-STOP. Do not return any flight deals with 2 or more stops.
 Also, if the flight has a layover longer than 3 hours, you MUST highlight it explicitly by populating a warning message in the JSON under the "longLayoverWarning" field (e.g. "⚠️ Long Layover: 4.5 hours"). If the layover is under 3 hours or it's a nonstop flight, set "longLayoverWarning" to null.
 
 Return a JSON array of the deals found. Do not include any conversational filler, markdown formatting outside of the JSON block itself, or extra text. Output strictly a JSON array matching this schema:
@@ -374,7 +419,7 @@ Return a JSON array of the deals found. Do not include any conversational filler
     // Inject booking links based on parsed data
     return parsedDeals.map(d => ({
       ...d,
-      bookingLink: `https://www.google.com/travel/flights?q=Flights%20to%20${d.destinationAirport}%20from%20${d.departureAirport}%20on%20${d.outboundDate}%20through%20${d.returnDate}`
+      bookingLink: generateReliableFlightUrl(d.departureAirport, d.destinationAirport, d.outboundDate, d.returnDate)
     }));
   } catch (err) {
     log(`Parsing error: Failed to parse Gemini output: ${text.substring(0, 150)}...`);
@@ -436,7 +481,7 @@ async function runTravelpayoutsScan(airports, token, log) {
         returnDate: flight.return_date,
         description: `Verified recent flight found via global user searches. ${flight.number_of_changes === 0 ? "Nonstop" : `${flight.number_of_changes} stop`} route.`,
         bookingWindow: "Subject to seat availability",
-        bookingLink: `https://www.google.com/travel/flights?q=Flights%20to%20${destCode}%20from%20${flight.origin}%20on%20${flight.depart_date}%20through%20${flight.return_date}`
+        bookingLink: generateReliableFlightUrl(flight.origin, destCode, flight.depart_date, flight.return_date)
       });
     }
   }
@@ -514,7 +559,7 @@ async function runKiwiScan(airports, apiKey, log) {
       returnDate: returnDate,
       description: `Live price drop found via Kiwi.com Tequila. ${flight.route && flight.route.length > 2 ? 'Connecting' : 'Nonstop'} flight with beautiful pacing.`,
       bookingWindow: "Instant booking available",
-      bookingLink: flight.deep_link || `https://www.google.com/travel/flights?q=Flights%20to%20${flight.flyTo}%20from%20${flight.flyFrom}%20on%20${flight.local_departure.split('T')[0]}%20through%20${returnDate}`,
+      bookingLink: flight.deep_link || generateReliableFlightUrl(flight.flyFrom, flight.flyTo, flight.local_departure.split('T')[0], returnDate),
       longLayoverWarning: layoverInfo.hasLongLayover ? layoverInfo.layoverText : null
     };
   });
@@ -722,7 +767,7 @@ async function verifyDeal(deal, kiwiApiKey, travelpayoutsToken, log) {
               dealPrice: bestFlight.value,
               outboundDate: bestFlight.depart_date,
               returnDate: bestFlight.return_date,
-              bookingLink: `https://www.google.com/travel/flights?q=Flights%20to%20${deal.destinationAirport}%20from%20${deal.departureAirport}%20on%20${bestFlight.depart_date}%20through%20${bestFlight.return_date}`,
+              bookingLink: generateReliableFlightUrl(deal.departureAirport, deal.destinationAirport, bestFlight.depart_date, bestFlight.return_date),
               verified: true,
               description: `[✓ Verified Nearby Dates: ${bestFlight.depart_date} to ${bestFlight.return_date}] ${deal.description}`
             };
@@ -742,6 +787,92 @@ async function verifyDeal(deal, kiwiApiKey, travelpayoutsToken, log) {
 
   deal.verified = false;
   return deal;
+}
+
+// ---------------------------------------------------------------------------
+// Deal validation — called by GET /api/deals before serving cached results
+// ---------------------------------------------------------------------------
+
+/**
+ * Filters and re-verifies a set of stored deals for freshness.
+ *
+ * Pass 1 (instant, no API): removes deals whose outbound date is in the past.
+ * Pass 2 (Travelpayouts/Kiwi): re-verifies deals older than REVALIDATION_TTL.
+ *   - Demo deals skip live re-verification (prices are illustrative).
+ *   - Live deals that fail re-verification are dropped.
+ *
+ * Returns { valid: Deal[], removed: number } — always resolves, never throws.
+ */
+export async function validateStoredDeals(deals, { travelpayoutsToken, kiwiApiKey } = {}) {
+  if (!deals || deals.length === 0) return { valid: [], removed: 0 };
+
+  const silentLog = () => {}; // suppress verifier logs during background validation
+  const REVALIDATION_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const now = Date.now();
+
+  // Pass 1: drop past-date deals instantly
+  const futureDeals = deals.filter(deal => {
+    if (!deal.outboundDate) return false;
+    const outbound = new Date(deal.outboundDate);
+    return outbound >= today;
+  });
+
+  const droppedByDate = deals.length - futureDeals.length;
+  if (droppedByDate > 0) {
+    console.log(`[Deal Validator] Dropped ${droppedByDate} deal(s) with past outbound dates.`);
+  }
+
+  // Pass 2: separate fresh vs stale deals
+  const freshDeals = [];
+  const staleDeals = [];
+
+  for (const deal of futureDeals) {
+    const isDemoOrUnverifiable = deal.engine === 'demo' || (!travelpayoutsToken && !kiwiApiKey);
+    if (isDemoOrUnverifiable) {
+      freshDeals.push(deal); // demo deals: date-check only
+      continue;
+    }
+    const ageMs = deal.scannedAt ? now - new Date(deal.scannedAt).getTime() : REVALIDATION_TTL_MS + 1;
+    if (ageMs < REVALIDATION_TTL_MS) {
+      freshDeals.push(deal);
+    } else {
+      staleDeals.push(deal);
+    }
+  }
+
+  if (staleDeals.length === 0) {
+    return { valid: freshDeals, removed: droppedByDate };
+  }
+
+  console.log(`[Deal Validator] Re-verifying ${staleDeals.length} stale deal(s) via live API...`);
+
+  // Pass 3: re-verify stale deals in parallel (cap at 8 concurrent to avoid rate limits)
+  const CONCURRENCY = 8;
+  const revalidated = [];
+  for (let i = 0; i < staleDeals.length; i += CONCURRENCY) {
+    const batch = staleDeals.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(
+      batch.map(deal =>
+        verifyDeal(deal, kiwiApiKey, travelpayoutsToken, silentLog)
+          .then(result => result ? { ...result, scannedAt: new Date().toISOString() } : null)
+          .catch(() => null)
+      )
+    );
+    revalidated.push(...results.filter(Boolean));
+  }
+
+  const droppedStale = staleDeals.length - revalidated.length;
+  if (droppedStale > 0) {
+    console.log(`[Deal Validator] Dropped ${droppedStale} stale deal(s) that failed live re-verification.`);
+  }
+  console.log(`[Deal Validator] Validation complete. ${freshDeals.length + revalidated.length} valid deal(s) remaining.`);
+
+  return {
+    valid: [...freshDeals, ...revalidated],
+    removed: droppedByDate + droppedStale,
+  };
 }
 
 /**

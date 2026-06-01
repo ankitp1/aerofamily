@@ -4,7 +4,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import dotenv from 'dotenv';
-import { runScan, runResearch } from './agent.js';
+import { runScan, runResearch, validateStoredDeals } from './agent.js';
+import { sendWishlistAlertEmail } from './emailService.js';
 import { OAuth2Client } from 'google-auth-library';
 import admin from 'firebase-admin';
 import * as functions from 'firebase-functions';
@@ -178,11 +179,31 @@ app.use(authenticateUser);
 // API ROUTES
 // ----------------------------------------------------
 
-// Get deals from Firestore / Local Fallback
+// Get deals from Firestore / Local Fallback — validates freshness before serving
 app.get('/api/deals', async (req, res) => {
   const userId = req.user ? req.user.id : 'guest';
   const data = await getDbDoc('deals', userId, { deals: [] });
-  res.json(data ? (data.deals || []) : []);
+  const rawDeals = data ? (data.deals || []) : [];
+
+  if (rawDeals.length === 0) return res.json([]);
+
+  try {
+    const { valid, removed } = await validateStoredDeals(rawDeals, {
+      travelpayoutsToken: process.env.TRAVELPAYOUTS_TOKEN,
+      kiwiApiKey:         process.env.KIWI_API_KEY,
+    });
+
+    // Persist the cleaned set back to DB if any deals were dropped
+    if (removed > 0) {
+      console.log(`[Deals API] Pruned ${removed} expired/invalid deal(s) for user ${userId}.`);
+      await setDbDoc('deals', userId, { deals: valid });
+    }
+
+    res.json(valid);
+  } catch (err) {
+    console.error('[Deals API] Validation error — serving raw deals as fallback:', err.message);
+    res.json(rawDeals);
+  }
 });
 
 // Get profile from Firestore / Local Fallback
@@ -264,6 +285,106 @@ async function setCachedAirportDeals(airportCode, engine, deals) {
 }
 
 // Trigger scan manually (Firestore / Local Fallback Integration)
+function computeRelevanceScore(deal, profile, loyaltyBalances) {
+  let score = 0;
+  let reasons = [];
+
+  // 1. Savings Value (max ~40 points)
+  const savings = deal.savingsPercent || Math.round(((deal.normalPrice - deal.dealPrice) / deal.normalPrice) * 100) || 0;
+  let savingsPoints = Math.min(savings, 40); 
+  score += savingsPoints;
+  if (savingsPoints > 25) reasons.push(`Exceptional savings (${savings}%)`);
+
+  // 2. Budget Comfort (max 20 points)
+  const familyBudget = profile.familyProfile?.budget || Infinity;
+  const totalPassengers = (profile.familyProfile?.adults || 1) + (profile.familyProfile?.kids || 0);
+  const totalCost = deal.dealPrice * totalPassengers;
+  
+  if (totalCost < familyBudget * 0.5) {
+    score += 20;
+    reasons.push('Well under budget');
+  } else if (totalCost < familyBudget * 0.8) {
+    score += 10;
+  }
+
+  // 3. Interest Matching (max 20 points)
+  const interests = profile.familyProfile?.interests || [];
+  const dealText = `${deal.destination} ${deal.description || ''} ${deal.destinationAirport}`.toLowerCase();
+  
+  let interestMatch = false;
+  for (const interest of interests) {
+    const keyword = interest.toLowerCase();
+    if (dealText.includes(keyword) || 
+       (keyword === 'beach' && ['cun', 'sju', 'puj', 'nassau', 'bahamas', 'cancun', 'puerto rico'].some(k => dealText.includes(k))) ||
+       (keyword === 'kid-friendly' && ['disney', 'family', 'resort', 'all-inclusive'].some(k => dealText.includes(k)))) {
+      interestMatch = true;
+      reasons.push(`Matches your interest: ${interest}`);
+    }
+  }
+  if (interestMatch) score += 20;
+
+  // 4. Loyalty Program Synergy (max 20 points)
+  let loyaltyMatch = false;
+  const dealAirlines = (deal.airlines || '').toLowerCase();
+  
+  for (const acct of loyaltyBalances) {
+    if (acct.balance > 20000) {
+      if (acct.airline_code && dealAirlines.includes(acct.airline_code.toLowerCase())) {
+         loyaltyMatch = true;
+      } else if (acct.program_id === 'delta_skymiles' && dealAirlines.includes('delta')) {
+         loyaltyMatch = true;
+      } else if (acct.program_id === 'united_mileageplus' && dealAirlines.includes('united')) {
+         loyaltyMatch = true;
+      }
+      
+      if (loyaltyMatch) {
+         score += 20;
+         reasons.push(`You have ${acct.balance.toLocaleString()} ${acct.program_name} miles`);
+         break;
+      }
+    }
+  }
+
+  // 5. Seasonality Rating (max 15 points)
+  const optimalMonths = {
+    'SJU': [12, 1, 2, 3, 4], // Winter/Spring
+    'PUJ': [12, 1, 2, 3, 4], // Winter/Spring
+    'NAS': [12, 1, 2, 3, 4], // Winter/Spring
+    'CUN': [12, 1, 2, 3, 4], // Winter/Spring
+    'PHX': [11, 12, 1, 2, 3, 4], // Avoid summer
+    'MCO': [11, 12, 1, 2, 3, 4, 10], // Avoid summer heat
+    'FCO': [4, 5, 6, 9, 10], // Shoulder season
+    'LHR': [5, 6, 7, 8, 9], // Summer
+    'HNL': [4, 5, 9, 10], // Shoulder season
+    'LIH': [4, 5, 9, 10], // Shoulder season
+    'CDG': [4, 5, 6, 9, 10] // Paris
+  };
+  
+  if (deal.outboundDate) {
+    const outboundMonth = parseInt(deal.outboundDate.split('-')[1], 10);
+    const destCode = (deal.destinationAirport || '').toUpperCase();
+    const bestMonths = optimalMonths[destCode];
+    if (bestMonths && bestMonths.includes(outboundMonth)) {
+      score += 15;
+      reasons.push(`Optimal weather season to visit ${destCode}`);
+    }
+  }
+
+  // 6. Visa Requirements Boost
+  const destStr = (deal.destination || '').toLowerCase();
+  const visaFreeCountries = ['mexico', 'costa rica', 'panama', 'colombia', 'peru', 'georgia', 'turkey', 'taiwan', 'philippines', 'dominican republic', 'belize', 'honduras', 'guatemala', 'bahamas', 'antigua', 'albania', 'montenegro'];
+  const isVisaFreeDest = visaFreeCountries.some(c => destStr.includes(c));
+  
+  const usStatus = profile.usStatus || 'US Citizen';
+  if (usStatus === 'US Citizen' || 
+     (isVisaFreeDest && (usStatus === 'US Green Card' || usStatus.includes('Valid US Visa')))) {
+    score += 10;
+    reasons.push('Passport/Visa friendly destination');
+  }
+
+  return { score: Math.min(Math.round(score), 100), reasons };
+}
+
 app.post('/api/scan', async (req, res) => {
   try {
     const userId = req.user ? req.user.id : 'guest';
@@ -276,16 +397,20 @@ app.post('/api/scan', async (req, res) => {
       activeEngine: "demo"
     });
 
-    const engine = profile.activeEngine || 'demo';
-    const airports = profile.airports || [];
-    
+    const engine          = profile.activeEngine || 'demo';
+    const airports        = profile.airports || [];
+    const familyBudget    = profile.familyProfile.budget;
+    const totalPassengers = (profile.familyProfile.adults || 1) + (profile.familyProfile.kids || 0);
+
     let allDeals = [];
     let cacheHits = 0;
     let cacheMisses = [];
 
     // 1. Process each departure airport
+    // Include budget+passengers in cache key so profile changes bust stale cached results
+    const budgetCacheTag = `b${Math.floor(familyBudget / 100) * 100}_p${totalPassengers}`;
     for (const airport of airports) {
-      const cached = await getCachedAirportDeals(airport.code, engine);
+      const cached = await getCachedAirportDeals(airport.code, `${engine}_${budgetCacheTag}`);
       if (cached) {
         allDeals.push(...cached);
         cacheHits++;
@@ -312,7 +437,9 @@ app.post('/api/scan', async (req, res) => {
         airports: cacheMisses,
         geminiKey: process.env.GEMINI_API_KEY,
         travelpayoutsToken: process.env.TRAVELPAYOUTS_TOKEN,
-        kiwiApiKey: process.env.KIWI_API_KEY
+        kiwiApiKey: process.env.KIWI_API_KEY,
+        familyBudget:   profile.familyProfile.budget,
+        passengers:     (profile.familyProfile.adults || 1) + (profile.familyProfile.kids || 0),
       });
 
       // Update scan metadata
@@ -328,16 +455,21 @@ app.post('/api/scan', async (req, res) => {
         // Group live deals by departure airport and write back cache entries
         for (const airport of cacheMisses) {
           const airportDeals = liveDeals.filter(d => d.departureAirport === airport.code || airport.code === "ATL");
-          await setCachedAirportDeals(airport.code, engine, airportDeals);
+          await setCachedAirportDeals(airport.code, `${engine}_${budgetCacheTag}`, airportDeals);
         }
       }
     }
 
-    // 3. User-Specific Budget Filtering
-    const familyBudget = profile.familyProfile.budget;
+    // 3. User-Specific Budget Filtering — compare family TOTAL cost vs budget
+    const userEmail = profile.email || null;
+    const loyaltyBalances = await getAwardWalletBalances(userId, db, userEmail);
+
     const activeDeals = allDeals.filter(d => {
-      return d.dealPrice <= familyBudget;
-    });
+      return d.dealPrice * totalPassengers <= familyBudget;
+    }).map(d => {
+      const relevance = computeRelevanceScore(d, profile, loyaltyBalances);
+      return { ...d, relevanceScore: relevance.score, relevanceReasons: relevance.reasons };
+    }).sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
 
     scanResult.dealsFound = activeDeals.length;
     scanResult.deals = activeDeals;
@@ -345,6 +477,48 @@ app.post('/api/scan', async (req, res) => {
     // Save results if scan succeeded or warning-succeeded
     if (scanResult.status === 'success' || scanResult.status === 'warning') {
       await setDbDoc('deals', userId, { deals: activeDeals });
+
+      // 4. Wishlist Processing
+      const wishlist = profile.wishlist || [];
+      const logsData = await getDbDoc('logs', userId, { logs: [] });
+      let wishlistAlertLog = profile.wishlistAlertLog || {};
+      const now = Date.now();
+      const ONE_DAY = 24 * 60 * 60 * 1000;
+      let profileNeedsUpdate = false;
+
+      for (const wish of wishlist) {
+        // Skip if we sent an email for this destination within the last 24h
+        if (wishlistAlertLog[wish.destination] && (now - wishlistAlertLog[wish.destination] < ONE_DAY)) {
+          continue;
+        }
+
+        // Find deals matching destination and optional month range
+        const matchingDeals = activeDeals.filter(d => {
+          if (!d.destination.toLowerCase().includes(wish.destination.toLowerCase())) return false;
+          if (wish.startMonth && wish.endMonth) {
+            const dealMonth = new Date(d.outboundDate).getMonth() + 1;
+            const start = parseInt(wish.startMonth);
+            const end = parseInt(wish.endMonth);
+            if (dealMonth < start || dealMonth > end) return false;
+          }
+          return true;
+        });
+
+        if (matchingDeals.length > 0) {
+          // Send email alert
+          try {
+            await sendWishlistAlertEmail(matchingDeals, wish.destination);
+            wishlistAlertLog[wish.destination] = now;
+            profileNeedsUpdate = true;
+          } catch (e) {
+            console.error("Failed to send wishlist alert:", e);
+          }
+        }
+      }
+
+      if (profileNeedsUpdate) {
+        await setDbDoc('profiles', userId, { ...profile, wishlistAlertLog });
+      }
     }
 
     // Save to logs (limit log history to top 15 records)
@@ -854,7 +1028,9 @@ export const scheduledScan = onSchedule({
           airports,
           geminiKey: process.env.GEMINI_API_KEY,
           travelpayoutsToken: process.env.TRAVELPAYOUTS_TOKEN,
-          kiwiApiKey: process.env.KIWI_API_KEY
+          kiwiApiKey: process.env.KIWI_API_KEY,
+          familyBudget: profile.familyProfile?.budget,
+          passengers:   (profile.familyProfile?.adults || 1) + (profile.familyProfile?.kids || 0),
         });
         
         // Save deals if scan succeeded or warning-succeeded

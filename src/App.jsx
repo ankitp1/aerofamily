@@ -5,36 +5,36 @@ const PREMIUM_CARDS = {
   "Amex Platinum": {
     name: "Amex Platinum",
     multiplier: 5,
-    valuation: 0.020, // 2.0c
-    returnRate: 0.10, // 10.0%
+    valuation: 0.010, // 1.0c conservative
+    returnRate: 0.05, // 5.0%
     idealFor: "Flights booked direct / Amex Travel"
   },
   "Chase Sapphire Reserve": {
     name: "Chase Sapphire Reserve",
     multiplier: 3,
-    valuation: 0.020, // 2.0c
-    returnRate: 0.06, // 6.0%
+    valuation: 0.015, // 1.5c conservative
+    returnRate: 0.045, // 4.5%
     idealFor: "Any travel purchase"
   },
   "Amex Gold": {
     name: "Amex Gold",
     multiplier: 3,
-    valuation: 0.020, // 2.0c
-    returnRate: 0.06, // 6.0%
+    valuation: 0.010, // 1.0c conservative
+    returnRate: 0.03, // 3.0%
     idealFor: "Flights booked direct"
   },
   "Capital One Venture X": {
     name: "Capital One Venture X",
-    multiplier: 2, // 2x flat-rate, 5x via portal (we use 2.5x average or 2x flat)
-    valuation: 0.018, // 1.8c
-    returnRate: 0.036, // 3.6%
+    multiplier: 2, 
+    valuation: 0.010, // 1.0c conservative
+    returnRate: 0.02, // 2.0%
     idealFor: "General travel & flat-rate"
   },
   "Chase Sapphire Preferred": {
     name: "Chase Sapphire Preferred",
     multiplier: 2,
-    valuation: 0.020, // 2.0c
-    returnRate: 0.04, // 4.0%
+    valuation: 0.0125, // 1.25c conservative
+    returnRate: 0.025, // 2.5%
     idealFor: "Travel purchases, low annual fee"
   }
 };
@@ -347,6 +347,38 @@ function DeltaAwardSearchPanel({ deal, awBalances, backendUrl, authHeaders }) {
   );
 }
 
+function checkVisaStatus(destinationString, profile) {
+  if (!destinationString || !profile) return null;
+  const dest = destinationString.toLowerCase();
+  
+  // List of countries allowing visa-free entry for valid US Visas / GC
+  const visaFreeCountries = ['mexico', 'costa rica', 'panama', 'colombia', 'peru', 'georgia', 'turkey', 'taiwan', 'philippines', 'dominican republic', 'belize', 'honduras', 'guatemala', 'bahamas', 'antigua', 'albania', 'montenegro'];
+  
+  const isVisaFreeDest = visaFreeCountries.some(c => dest.includes(c));
+  const usStatus = profile.usStatus || 'US Citizen';
+
+  if (usStatus === 'US Citizen') {
+    return { status: 'free', text: '🛂 US Passport - Visa Free' };
+  }
+  
+  if (isVisaFreeDest) {
+    if (usStatus === 'US Green Card') {
+      return { status: 'free', text: '🛂 Visa-Free with US Green Card' };
+    }
+    if (usStatus.includes('Valid US Visa')) {
+      return { status: 'free', text: '🛂 Visa-Free with Valid US Visa' };
+    }
+  }
+
+  if (usStatus.includes('Expired') || usStatus === 'No Visa' || usStatus.includes('Advance Parole')) {
+    if (isVisaFreeDest) return { status: 'required', text: '⚠️ Valid US Visa Required (AP Not Accepted)' };
+    return { status: 'required', text: '⚠️ Visa Required' };
+  }
+
+  // Fallback for general countries not explicitly covered
+  return { status: 'unknown', text: 'ℹ️ Check Visa Requirements' };
+}
+
 export default function App() {
   // App Auth States
   const [isLoggedIn, setIsLoggedIn] = useState(() => {
@@ -366,6 +398,9 @@ export default function App() {
   });
 
   const [activeTab, setActiveTab] = useState('deals');
+  const [newWishDest, setNewWishDest] = useState('');
+  const [newWishStart, setNewWishStart] = useState('');
+  const [newWishEnd, setNewWishEnd] = useState('');
   const [theme, setTheme] = useState(() => {
     return localStorage.getItem('aerofamily_theme') || 'dark';
   });
@@ -384,7 +419,9 @@ export default function App() {
   const [deals, setDeals] = useState([]);
   const [profile, setProfile] = useState({
     airports: [{ code: "ATL", name: "Hartsfield-Jackson Atlanta (ATL)", type: "biggest" }],
-    creditCards: ["Chase Sapphire Reserve", "Amex Gold"],
+    creditCards: ["Capital One Venture X"],
+    passportCountry: "India",
+    usStatus: "Valid US Visa (B1/B2/H1/H4)",
     familyProfile: { adults: 2, kids: 1, budget: 2500, interests: ["Beach", "Kid-Friendly"] },
     activeEngine: "demo"
   });
@@ -393,9 +430,14 @@ export default function App() {
   const [researchingDest, setResearchingDest] = useState(null);
   const [scanning, setScanning] = useState(false);
   const [scanConsoleLogs, setScanConsoleLogs] = useState([]);
+  // Tracks whether a scan has ever completed this session, and how many raw deals it found
+  const [lastScanDealsFound, setLastScanDealsFound] = useState(null); // null = never scanned
   const [newAirportCode, setNewAirportCode] = useState('');
   const [selectedDeal, setSelectedDeal] = useState(null);
   const [hoveredAirport, setHoveredAirport] = useState(null);
+  const [isGridView, setIsGridView] = useState(false);
+  const [filterStartDate, setFilterStartDate] = useState('');
+  const [filterEndDate, setFilterEndDate] = useState('');
   
   // Custom mock email input state for Simulated Dev Login
   const [devEmail, setDevEmail] = useState('');
@@ -806,6 +848,10 @@ export default function App() {
       const res = await fetch(`${BACKEND_URL}/api/logs`, { headers });
       const data = await res.json();
       setLogs(data);
+      // Seed lastScanDealsFound from most recent log entry so refresh shows correct empty state
+      if (Array.isArray(data) && data.length > 0 && data[0].dealsFound !== undefined) {
+        setLastScanDealsFound(data[0].dealsFound);
+      }
     } catch (err) {
       console.error("Error fetching logs:", err);
     }
@@ -820,6 +866,27 @@ export default function App() {
     } catch (err) {
       console.error("Error saving profile:", err);
     }
+  };
+
+  const handleAddWishlist = () => {
+    if (!newWishDest.trim()) return;
+    const item = { destination: newWishDest.trim() };
+    if (newWishStart) item.startMonth = newWishStart;
+    if (newWishEnd) item.endMonth = newWishEnd;
+    
+    const currentList = profile.wishlist || [];
+    saveProfile({ ...profile, wishlist: [...currentList, item] });
+    
+    setNewWishDest('');
+    setNewWishStart('');
+    setNewWishEnd('');
+  };
+
+  const handleRemoveWishlist = (index) => {
+    const currentList = profile.wishlist || [];
+    const newList = [...currentList];
+    newList.splice(index, 1);
+    saveProfile({ ...profile, wishlist: newList });
   };
 
   const registerWhatsApp = async () => {
@@ -893,6 +960,7 @@ export default function App() {
       setTimeout(() => {
         // Push actual agent logs to console log visualizer
         setScanConsoleLogs(prev => [...prev, ...result.logs, `[System] Process completed with status: ${result.status.toUpperCase()}`]);
+        setLastScanDealsFound(result.dealsFound ?? 0);
         setScanning(false);
         fetchDeals();
         fetchLogs();
@@ -953,6 +1021,7 @@ export default function App() {
         cardName: card.name,
         points: pointsEarned,
         savings: pointsValueCash,
+        netEffectiveCost: totalFlightCost - pointsValueCash,
         returnRate: netReturnRate,
         idealFor: card.idealFor
       };
@@ -1185,92 +1254,182 @@ export default function App() {
 
   if (!isLoggedIn) {
     return (
-      <div className="min-h-screen flex flex-col justify-between pb-12 bg-[#080a0f] relative overflow-hidden">
-        {/* Simple Header */}
-        <header className="glass-panel px-6 py-4 flex items-center justify-between">
+      <div className="min-h-screen bg-[#080a0f] text-slate-200 font-sans selection:bg-indigo-500/30 overflow-x-hidden">
+        {/* Navigation Bar */}
+        <nav className="fixed top-0 w-full z-50 glass-panel border-b border-indigo-500/10 px-6 py-4 flex items-center justify-between transition-all duration-300">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-indigo-600/40">✈️</div>
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-indigo-600/40">✈️</div>
             <div>
-              <h1 className="text-xl font-extrabold font-heading tracking-tight gradient-text">AeroFamily</h1>
-              <p className="text-[10px] uppercase font-bold tracking-widest text-indigo-400">Agentic Deal Finder</p>
+              <h1 className="text-xl font-extrabold font-heading tracking-tight text-white">AeroFamily</h1>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-4">
             <button 
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-              className="flex items-center justify-center w-8 h-8 rounded-full bg-[#131824] hover:bg-[#1a2030] text-indigo-300 border border-indigo-950/60 transition-all cursor-pointer bg-transparent text-sm shadow-md"
-              title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+              onClick={() => {
+                document.getElementById('auth-section').scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="hidden md:block text-sm font-bold text-slate-300 hover:text-white transition-colors cursor-pointer bg-transparent border-none"
             >
-              {theme === 'dark' ? '☀️' : '🌙'}
+              Log In
             </button>
             <button 
-              onClick={() => setOnboardingStep(1)}
-              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#131824] hover:bg-[#1a2030] text-indigo-300 border border-indigo-950/60 transition-colors font-bold cursor-pointer bg-transparent text-xs"
+              onClick={() => {
+                document.getElementById('auth-section').scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="btn btn-primary text-sm px-5 py-2 shadow-lg shadow-indigo-500/20"
             >
-              <span>🧭</span>
-              <span>Tour Guide</span>
+              Get Started
             </button>
           </div>
-        </header>
+        </nav>
 
-        {/* LOGIN SCREEN */}
-        <main className="max-w-md w-full mx-auto px-6 mt-16 flex-1 flex flex-col justify-center">
-          <div className="glass-card p-8 space-y-6 text-center shadow-2xl border-indigo-500/10">
-            <div className="w-16 h-16 rounded-2xl bg-indigo-600/10 border border-indigo-500/20 flex items-center justify-center text-3xl mx-auto shadow-lg shadow-indigo-600/10 animate-bounce">
-              🔒
+        {/* Hero Section */}
+        <section className="relative pt-32 pb-20 md:pt-48 md:pb-32 px-6 max-w-7xl mx-auto flex flex-col items-center text-center">
+          <div className="absolute inset-0 top-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-900/40 via-[#080a0f] to-[#080a0f] -z-10 pointer-events-none"></div>
+          
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs font-bold uppercase tracking-widest mb-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+            <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse"></span>
+            Meet Your Autonomous Travel Agent
+          </div>
+          
+          <h1 className="text-5xl md:text-7xl font-black font-heading text-white tracking-tight leading-[1.1] mb-6 max-w-4xl animate-in fade-in slide-in-from-bottom-6 duration-700 delay-100">
+            Never Overpay For <br className="hidden md:block" />
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400">Family Vacations</span> Again.
+          </h1>
+          
+          <p className="text-lg md:text-xl text-slate-400 max-w-2xl mb-10 leading-relaxed animate-in fade-in slide-in-from-bottom-8 duration-700 delay-200">
+            AeroFamily works while you sleep. We autonomously scan the web for error fares, verify your visa requirements, and calculate the exact credit card points you need—tailored for your whole family.
+          </p>
+          
+          <div className="flex flex-col sm:flex-row gap-4 animate-in fade-in slide-in-from-bottom-10 duration-700 delay-300">
+            <button 
+              onClick={() => document.getElementById('auth-section').scrollIntoView({ behavior: 'smooth' })}
+              className="btn btn-primary text-base px-8 py-4 shadow-xl shadow-indigo-600/20 hover:scale-105 transition-transform"
+            >
+              Start Hunting Deals
+            </button>
+            <button 
+              onClick={() => document.getElementById('features-section').scrollIntoView({ behavior: 'smooth' })}
+              className="btn bg-slate-800/50 text-white hover:bg-slate-700/50 border border-slate-700 text-base px-8 py-4 hover:scale-105 transition-transform"
+            >
+              See How It Works ↓
+            </button>
+          </div>
+        </section>
+
+        {/* Features Grid Section */}
+        <section id="features-section" className="py-24 px-6 bg-slate-900/20 border-y border-slate-800/50">
+          <div className="max-w-7xl mx-auto">
+            <div className="text-center mb-16">
+              <h2 className="text-3xl md:text-4xl font-black font-heading text-white mb-4">An Entire Travel Agency In Your Pocket</h2>
+              <p className="text-slate-400 max-w-2xl mx-auto">Everything you need to plan, book, and save on your next family adventure, consolidated into one powerful AI dashboard.</p>
             </div>
             
-            <div className="space-y-2">
-              <h2 className="text-2xl font-black font-heading text-white">Welcome to AeroFamily</h2>
-              <p className="text-xs text-slate-400 leading-relaxed max-w-sm mx-auto">
-                Sign in with your Google profile to access your personalized flight scanners, credit card benefit calculations, and 5-day family itineraries!
-              </p>
-            </div>
-
-            {/* Google Sign In Button Container */}
-            <div className="flex flex-col items-center justify-center py-2">
-              <div id="google-signin-btn"></div>
-              <div className="text-[10px] text-slate-500 mt-2 font-mono">Secured by Google Identity Services</div>
-            </div>
-
-            <div className="flex items-center gap-2 my-4">
-              <hr className="flex-1 border-slate-800/80" />
-              <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500">OR</span>
-              <hr className="flex-1 border-slate-800/80" />
-            </div>
-
-            {/* Simulated Dev Login (Fallback) */}
-            <form onSubmit={handleSimulatedLogin} className="space-y-3 bg-slate-950/40 p-4 rounded-xl border border-slate-800/80 text-left">
-              <div className="text-[10px] uppercase font-black tracking-wider text-indigo-400 flex items-center gap-1">
-                <span>💡 Dev Sandbox Login</span>
-                <span className="badge badge-accent text-[8px] px-1 py-0 border-none">Simulated</span>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              {/* Feature 1 */}
+              <div className="glass-card p-8 rounded-3xl border border-slate-800 hover:border-indigo-500/50 transition-colors group">
+                <div className="w-14 h-14 rounded-2xl bg-indigo-500/20 flex items-center justify-center text-3xl mb-6 group-hover:scale-110 transition-transform">🤖</div>
+                <h3 className="text-2xl font-bold text-white mb-3 font-heading">Autonomous Deal Scanning</h3>
+                <p className="text-slate-400 leading-relaxed">
+                  Tell us your home airport and family size. Our AI constantly scours the web, catching error fares and massive price drops before they disappear. We do the math for the whole family instantly.
+                </p>
               </div>
-              <p className="text-[10px] text-slate-500 leading-normal">
-                No Client ID configured? No problem! Type any email below to immediately simulate a Google Profile and test user database isolation.
-              </p>
-              <div className="flex gap-2">
-                <input 
-                  type="email" 
-                  required
-                  placeholder="e.g. ankit@gmail.com"
-                  value={devEmail}
-                  onChange={(e) => setDevEmail(e.target.value)}
-                  className="form-control text-xs flex-1 bg-slate-900 border-slate-800 text-slate-200"
-                />
-                <button type="submit" className="btn btn-primary text-xs py-1.5 px-4 cursor-pointer">
-                  Dev Login
-                </button>
+              
+              {/* Feature 2 */}
+              <div className="glass-card p-8 rounded-3xl border border-slate-800 hover:border-blue-500/50 transition-colors group">
+                <div className="w-14 h-14 rounded-2xl bg-blue-500/20 flex items-center justify-center text-3xl mb-6 group-hover:scale-110 transition-transform">🛂</div>
+                <h3 className="text-2xl font-bold text-white mb-3 font-heading">Passport & Visa Guard</h3>
+                <p className="text-slate-400 leading-relaxed">
+                  Never get stuck at the border again. Input your citizenship and current US visa status. We'll automatically warn you if a cheap flight requires a transit visa you don't have.
+                </p>
               </div>
-            </form>
+
+              {/* Feature 3 */}
+              <div className="glass-card p-8 rounded-3xl border border-slate-800 hover:border-emerald-500/50 transition-colors group">
+                <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 flex items-center justify-center text-3xl mb-6 group-hover:scale-110 transition-transform">💳</div>
+                <h3 className="text-2xl font-bold text-white mb-3 font-heading">Credit Card Points Optimizer</h3>
+                <p className="text-slate-400 leading-relaxed">
+                  Don't pay cash if you don't have to. Link your travel credit cards (Chase, Amex, Capital One) and see the exact points cost for every flight deal on your radar.
+                </p>
+              </div>
+
+              {/* Feature 4 */}
+              <div className="glass-card p-8 rounded-3xl border border-slate-800 hover:border-amber-500/50 transition-colors group">
+                <div className="w-14 h-14 rounded-2xl bg-amber-500/20 flex items-center justify-center text-3xl mb-6 group-hover:scale-110 transition-transform">⭐</div>
+                <h3 className="text-2xl font-bold text-white mb-3 font-heading">Destination Wishlist Alerts</h3>
+                <p className="text-slate-400 leading-relaxed">
+                  Have a bucket-list trip to Japan? Add it to your wishlist with an optional month range. Go about your life, and we'll immediately email you the second a deal drops for your dates.
+                </p>
+              </div>
+            </div>
           </div>
-        </main>
+        </section>
 
-        {/* Simple Footer */}
-        <footer className="text-center text-[10px] text-slate-600 mt-12 font-mono">
-          AeroFamily Web App v2.1 • Local Secure Storage Activated
+        {/* Authentication Section */}
+        <section id="auth-section" className="py-32 px-6 flex flex-col items-center justify-center relative">
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom,_var(--tw-gradient-stops))] from-indigo-900/20 via-[#080a0f] to-[#080a0f] -z-10 pointer-events-none"></div>
+          
+          <div className="max-w-md w-full mx-auto">
+            <div className="glass-card p-10 space-y-8 text-center shadow-2xl border-indigo-500/30 rounded-[2rem] relative overflow-hidden">
+              {/* Decorative background glow */}
+              <div className="absolute -top-24 -right-24 w-48 h-48 bg-indigo-500/20 blur-3xl rounded-full pointer-events-none"></div>
+              <div className="absolute -bottom-24 -left-24 w-48 h-48 bg-purple-500/20 blur-3xl rounded-full pointer-events-none"></div>
+
+              <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-4xl mx-auto shadow-lg shadow-indigo-600/30">
+                🔒
+              </div>
+              
+              <div className="space-y-3 relative z-10">
+                <h2 className="text-3xl font-black font-heading text-white">Join AeroFamily</h2>
+                <p className="text-sm text-slate-400 leading-relaxed max-w-sm mx-auto">
+                  Securely authenticate to access your personalized flight scanners, digital wallet, and AI itineraries.
+                </p>
+              </div>
+
+              {/* Google Sign In Button Container */}
+              <div className="flex flex-col items-center justify-center py-4 relative z-10 bg-white/5 rounded-2xl p-6 border border-white/10">
+                <div id="google-signin-btn" className="transform scale-110 origin-center"></div>
+                <div className="text-[10px] text-slate-500 mt-4 font-mono">Secured by Google Identity Services</div>
+              </div>
+
+              <div className="flex items-center gap-3 my-6 relative z-10">
+                <hr className="flex-1 border-slate-800" />
+                <span className="text-xs font-bold text-slate-500 bg-[#080a0f] px-2">OR</span>
+                <hr className="flex-1 border-slate-800" />
+              </div>
+
+              {/* Simulated Dev Login (Fallback) */}
+              <form onSubmit={handleSimulatedLogin} className="space-y-4 bg-slate-900/80 p-5 rounded-2xl border border-slate-700/50 text-left relative z-10 backdrop-blur-sm">
+                <div className="text-xs font-black tracking-wider text-indigo-400 flex items-center gap-2">
+                  <span>💡 Dev Sandbox Login</span>
+                  <span className="bg-indigo-500/20 text-indigo-300 text-[9px] px-2 py-0.5 rounded-md border border-indigo-500/30">Simulated</span>
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  No Client ID? Type any email below to simulate a Google Profile and enter the dashboard.
+                </p>
+                <div className="flex flex-col gap-3">
+                  <input 
+                    type="email" 
+                    required
+                    placeholder="e.g. ankit@gmail.com"
+                    value={devEmail}
+                    onChange={(e) => setDevEmail(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all placeholder:text-slate-600"
+                  />
+                  <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-4 rounded-xl transition-colors shadow-lg shadow-indigo-600/20 text-sm">
+                    Enter Sandbox
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </section>
+
+        {/* Footer */}
+        <footer className="border-t border-slate-800/50 bg-[#06080c] py-8 text-center text-xs text-slate-500 font-mono">
+          <p>AeroFamily Web App v2.2 • Local Secure Storage Activated</p>
+          <p className="mt-2 text-slate-600">Built for the autonomous future of travel.</p>
         </footer>
-
-        {renderOnboardingOverlay()}
       </div>
     );
   }
@@ -1278,7 +1437,12 @@ export default function App() {
   const passengers = profile.familyProfile.adults + profile.familyProfile.kids;
   const filteredDeals = deals.filter(deal => {
     const totalCost = deal.dealPrice * passengers;
-    return totalCost <= profile.familyProfile.budget;
+    if (totalCost > profile.familyProfile.budget) return false;
+    
+    if (filterStartDate && deal.outboundDate < filterStartDate) return false;
+    if (filterEndDate && deal.returnDate > filterEndDate) return false;
+    
+    return true;
   });
 
   const { timeAgoText, liveDealsCount, expiringText, departureAirport, nextScanText, newDealsCount } = getDynamicScanSummary(filteredDeals);
@@ -1362,18 +1526,25 @@ export default function App() {
                     SINCE YOUR LAST VISIT
                   </div>
                   
-                  {/* Large Stat */}
+                  {/* Large Stat — always reflects what's actually showing */}
                   <div className="flex items-baseline gap-3 mt-4">
-                    <span className="text-white text-8xl font-black font-heading leading-none">{newDealsCount}</span>
+                    <span className={`text-8xl font-black font-heading leading-none ${filteredDeals.length > 0 ? 'text-white' : 'text-slate-600'}`}>
+                      {filteredDeals.length}
+                    </span>
                     <div className="flex flex-col">
-                      <span className="text-emerald-400 font-extrabold text-sm uppercase tracking-wider leading-none">new</span>
+                      <span className="text-emerald-400 font-extrabold text-sm uppercase tracking-wider leading-none">live</span>
                       <span className="text-emerald-400 font-extrabold text-sm uppercase tracking-wider leading-none mt-1">deals</span>
                     </div>
                   </div>
-                  
+
                   {/* Dynamic description paragraph */}
                   <p className="text-slate-400 text-xs mt-4 leading-relaxed pretty-paragraph">
-                    The agent scanned <strong className="text-slate-200">15 routes</strong> from {departureAirport} {timeAgoText}. {liveDealsCount} deals are in budget.
+                    {lastScanDealsFound === null
+                      ? `No scan run yet from ${departureAirport}. Hit the button below to search for fare drops.`
+                      : lastScanDealsFound === 0
+                      ? `Last scan from ${departureAirport} ${timeAgoText} found no deals. Try switching engines or scanning again.`
+                      : <span>The agent found <strong className="text-slate-200">{lastScanDealsFound} deal{lastScanDealsFound !== 1 ? 's' : ''}</strong> from {departureAirport} {timeAgoText}. {liveDealsCount} within your ${profile.familyProfile.budget.toLocaleString()} budget.</span>
+                    }
                   </p>
 
                   {/* Family & Budget Interactive Controls */}
@@ -1446,7 +1617,7 @@ export default function App() {
                     <div>
                       <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">BEST SAVE</div>
                       <div className="text-emerald-400 text-2xl font-black font-heading mt-1">
-                        {deals.length > 0 ? Math.max(...deals.map(d => d.savingsPercent)) : 56}%
+                        {deals.length > 0 ? `${Math.max(...deals.map(d => d.savingsPercent))}%` : '—'}
                       </div>
                     </div>
                     <div>
@@ -1470,7 +1641,7 @@ export default function App() {
                 <div className="flex justify-between items-center z-10">
                   <div className="text-[10px] text-slate-500 font-extrabold uppercase tracking-widest flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-ping inline-block"></span>
-                    {deals.length || 6} LIVE ROUTES FROM {profile.airports[0]?.code || 'ATL'}
+                    {deals.length > 0 ? `${deals.length} LIVE ROUTE${deals.length !== 1 ? 'S' : ''} FROM` : 'NO ROUTES YET FROM'} {profile.airports[0]?.code || 'ATL'}
                   </div>
                   <span className="text-[9px] font-mono text-indigo-400 bg-indigo-950/30 px-2 py-0.5 rounded border border-indigo-900/30">
                     interactive radar
@@ -1501,136 +1672,103 @@ export default function App() {
                     {/* Grid Background */}
                     <rect width="100%" height="100%" fill="url(#flight-grid)" />
 
-                    {/* Central Glow under ATL */}
+                    {/* Central Glow under origin */}
                     <circle cx="360" cy="150" r="70" fill="url(#halo-glow)" />
 
-                    {/* Surrounding Nodes Bezier Curves */}
-                    {[
-                      { code: 'PHX', x: 230, y: 90, cx: 295, cy: 105 },
-                      { code: 'KOA', x: 120, y: 190, cx: 230, cy: 155 },
-                      { code: 'MDE', x: 380, y: 260, cx: 370, cy: 215 },
-                      { code: 'SJU', x: 540, y: 220, cx: 480, cy: 200, isBest: true },
-                      { code: 'NAS', x: 560, y: 120, cx: 485, cy: 125 },
-                      { code: 'PUJ', x: 670, y: 110, cx: 535, cy: 115 }
-                    ].map(node => {
-                      const matchDeal = deals.find(d => d.destinationAirport === node.code);
-                      const isWithinBudget = matchDeal ? (matchDeal.dealPrice * passengers <= profile.familyProfile.budget) : true;
-                      const isActive = isWithinBudget && (hoveredAirport === node.code || (!hoveredAirport && node.isBest));
-                      return (
-                        <g key={`path-group-${node.code}`} opacity={isWithinBudget ? 1 : 0.15}>
-                          {/* Shadow glow line for active curve */}
-                          {isActive && (
-                            <path
-                              d={`M 360 150 Q ${node.cx} ${node.cy} ${node.x} ${node.y}`}
-                              fill="none"
-                              stroke={node.isBest ? '#fbbf24' : '#6366f1'}
-                              strokeWidth="4"
-                              opacity="0.15"
-                              className="transition-all duration-300"
-                            />
-                          )}
-                          {/* Standard Curve Line */}
-                          <path
-                            d={`M 360 150 Q ${node.cx} ${node.cy} ${node.x} ${node.y}`}
-                            fill="none"
-                            stroke={isActive ? (node.isBest ? '#fbbf24' : '#818cf8') : 'rgba(99, 102, 241, 0.15)'}
-                            strokeWidth={isActive ? '2' : '1.2'}
-                            strokeDasharray={isActive ? 'none' : '3 4'}
-                            className="transition-all duration-300"
-                          />
-                        </g>
-                      );
-                    })}
+                    {/* Dynamically position deals in an elliptical arc around the origin */}
+                    {(() => {
+                      if (filteredDeals.length === 0) return null;
+                      const originX = 360, originY = 150;
+                      const xRadius = 220, yRadius = 95;
+                      // Spread angles from -150° to 150° (full arc, clockwise)
+                      const toRad = d => d * Math.PI / 180;
+                      const startAngle = toRad(-150);
+                      const endAngle   = toRad(150);
+                      const step = filteredDeals.length > 1 ? (endAngle - startAngle) / (filteredDeals.length - 1) : 0;
+                      const bestSavings = Math.max(...filteredDeals.map(d => d.savingsPercent));
 
-                    {/* Central Origin Node (ATL) */}
-                    <g>
-                      <circle cx="360" cy="150" r="16" fill="rgba(255, 255, 255, 0.05)" />
-                      <circle cx="360" cy="150" r="6" fill="#080a0f" stroke="white" strokeWidth="2" />
-                      <text x="360" y="132" fill="white" fontSize="10" fontWeight="800" textAnchor="middle" fontFamily="Outfit">
-                        {profile.airports[0]?.code || 'ATL'}
+                      const mapNodes = filteredDeals.map((deal, i) => {
+                        const angle = startAngle + i * step;
+                        const x = Math.round(originX + xRadius * Math.cos(angle));
+                        const y = Math.round(originY + yRadius * Math.sin(angle));
+                        const ctrlX = Math.round(originX + xRadius * 0.5 * Math.cos(angle));
+                        const ctrlY = Math.round(originY + yRadius * 0.5 * Math.sin(angle));
+                        return {
+                          code: deal.destinationAirport,
+                          x, y, cx: ctrlX, cy: ctrlY,
+                          price: `$${deal.dealPrice}`,
+                          deal,
+                          isBest: deal.savingsPercent === bestSavings,
+                          inBudget: deal.dealPrice * passengers <= profile.familyProfile.budget,
+                        };
+                      });
+
+                      return (
+                        <>
+                          {/* Bezier curve paths */}
+                          {mapNodes.map(node => {
+                            const isActive = node.inBudget && (hoveredAirport === node.code || (!hoveredAirport && node.isBest));
+                            return (
+                              <g key={`path-${node.deal.id}`} opacity={node.inBudget ? 1 : 0.15}>
+                                {isActive && (
+                                  <path d={`M ${originX} ${originY} Q ${node.cx} ${node.cy} ${node.x} ${node.y}`}
+                                    fill="none" stroke={node.isBest ? '#fbbf24' : '#6366f1'}
+                                    strokeWidth="4" opacity="0.15" className="transition-all duration-300" />
+                                )}
+                                <path d={`M ${originX} ${originY} Q ${node.cx} ${node.cy} ${node.x} ${node.y}`}
+                                  fill="none"
+                                  stroke={isActive ? (node.isBest ? '#fbbf24' : '#818cf8') : 'rgba(99,102,241,0.15)'}
+                                  strokeWidth={isActive ? '2' : '1.2'}
+                                  strokeDasharray={isActive ? 'none' : '3 4'}
+                                  className="transition-all duration-300" />
+                              </g>
+                            );
+                          })}
+
+                          {/* Central Origin Node */}
+                          <g>
+                            <circle cx={originX} cy={originY} r="16" fill="rgba(255,255,255,0.05)" />
+                            <circle cx={originX} cy={originY} r="6" fill="#080a0f" stroke="white" strokeWidth="2" />
+                            <text x={originX} y={originY - 18} fill="white" fontSize="10" fontWeight="800" textAnchor="middle" fontFamily="Outfit">
+                              {profile.airports[0]?.code || 'ATL'}
+                            </text>
+                          </g>
+
+                          {/* Destination Nodes */}
+                          {mapNodes.map(node => {
+                            const isActive = node.inBudget && (hoveredAirport === node.code || (!hoveredAirport && node.isBest));
+                            const displayColor = node.isBest ? '#fbbf24' : '#6366f1';
+                            return (
+                              <g key={`node-${node.deal.id}`}
+                                onMouseEnter={() => node.inBudget && setHoveredAirport(node.code)}
+                                onMouseLeave={() => node.inBudget && setHoveredAirport(null)}
+                                onClick={() => { if (node.inBudget) setSelectedDeal(node.deal); }}
+                                className={node.inBudget ? 'cursor-pointer' : 'cursor-not-allowed'}
+                                opacity={node.inBudget ? 1 : 0.25}
+                              >
+                                {isActive && <circle cx={node.x} cy={node.y} r="16" fill={node.isBest ? 'url(#yellow-glow)' : 'rgba(99,102,241,0.15)'} />}
+                                {isActive && <circle cx={node.x} cy={node.y} r="12" fill="none" stroke={displayColor} strokeWidth="1.5" opacity="0.6" className="animate-ping" />}
+                                <circle cx={node.x} cy={node.y}
+                                  r={isActive ? '5' : '4'}
+                                  fill={isActive ? displayColor : '#161b26'}
+                                  stroke={isActive ? 'white' : 'rgba(148,163,184,0.4)'}
+                                  strokeWidth="1.5" className="transition-all duration-300" />
+                                <text x={node.x} y={node.y - 12} fill="#64748b" fontSize="9" fontWeight="bold" textAnchor="middle" fontFamily="Inter">{node.code}</text>
+                                <text x={node.x} y={node.y + 18} fill={isActive ? displayColor : '#94a3b8'} fontSize="10" fontWeight="800" textAnchor="middle" fontFamily="Outfit">{node.price}</text>
+                              </g>
+                            );
+                          })}
+                        </>
+                      );
+                    })()}
+
+                    {/* Empty map state */}
+                    {filteredDeals.length === 0 && (
+                      <text x="360" y="158" fill="rgba(148,163,184,0.25)" fontSize="13"
+                        fontWeight="600" textAnchor="middle" fontFamily="Inter">
+                        {scanning ? 'Scanning routes…' : 'No routes — run a scan to populate the map'}
                       </text>
-                    </g>
-
-                    {/* Destination Nodes */}
-                    {[
-                      { code: 'PHX', x: 230, y: 90, price: '$229' },
-                      { code: 'KOA', x: 120, y: 190, price: '$458' },
-                      { code: 'MDE', x: 380, y: 260, price: '$289' },
-                      { code: 'SJU', x: 540, y: 220, price: '$222', isBest: true },
-                      { code: 'NAS', x: 560, y: 120, price: '$298' },
-                      { code: 'PUJ', x: 670, y: 110, price: '$347' }
-                    ].map(node => {
-                      const matchDeal = deals.find(d => d.destinationAirport === node.code);
-                      const isWithinBudget = matchDeal ? (matchDeal.dealPrice * passengers <= profile.familyProfile.budget) : true;
-                      const isActive = isWithinBudget && (hoveredAirport === node.code || (!hoveredAirport && node.isBest));
-                      const displayColor = node.isBest ? '#fbbf24' : '#6366f1';
-                      
-                      return (
-                        <g 
-                          key={`node-${node.code}`}
-                          onMouseEnter={() => isWithinBudget && setHoveredAirport(node.code)}
-                          onMouseLeave={() => isWithinBudget && setHoveredAirport(null)}
-                          onClick={() => {
-                            if (!isWithinBudget) return;
-                            if (matchDeal) setSelectedDeal(matchDeal);
-                          }}
-                          className={isWithinBudget ? "cursor-pointer" : "cursor-not-allowed"}
-                          opacity={isWithinBudget ? 1 : 0.25}
-                        >
-                          {/* Glow background behind SJU/active nodes */}
-                          {isActive && (
-                            <circle cx={node.x} cy={node.y} r="16" fill={node.isBest ? 'url(#yellow-glow)' : 'rgba(99, 102, 241, 0.15)'} />
-                          )}
-                          {/* Pulsing ring */}
-                          {isActive && (
-                            <circle 
-                              cx={node.x} 
-                              cy={node.y} 
-                              r="12" 
-                              fill="none" 
-                              stroke={displayColor} 
-                              strokeWidth="1.5" 
-                              opacity="0.6" 
-                              className="animate-ping"
-                            />
-                          )}
-                          {/* Inner circle */}
-                          <circle 
-                            cx={node.x} 
-                            cy={node.y} 
-                            r={isActive ? "5" : "4"} 
-                            fill={isActive ? displayColor : "#161b26"} 
-                            stroke={isActive ? "white" : "rgba(148, 163, 184, 0.4)"} 
-                            strokeWidth="1.5" 
-                            className="transition-all duration-300"
-                          />
-                          {/* Muted Airport Code above */}
-                          <text 
-                            x={node.x} 
-                            y={node.y - 12} 
-                            fill={isWithinBudget ? "#64748b" : "#475569"} 
-                            fontSize="9" 
-                            fontWeight="bold" 
-                            textAnchor="middle" 
-                            fontFamily="Inter"
-                          >
-                            {node.code}
-                          </text>
-                          {/* Price Tag below */}
-                          <text 
-                            x={node.x} 
-                            y={node.y + 18} 
-                            fill={isWithinBudget ? (isActive ? displayColor : '#94a3b8') : '#ef4444'} 
-                            fontSize="10" 
-                            fontWeight="800" 
-                            textAnchor="middle" 
-                            fontFamily="Outfit"
-                          >
-                            {isWithinBudget ? node.price : 'Over Budget'}
-                          </text>
-                        </g>
-                      );
-                    })}
+                    )}
                   </svg>
                 </div>
               </div>
@@ -1647,23 +1785,87 @@ export default function App() {
                   <span className="text-white text-base font-extrabold font-heading tracking-tight">
                     Live deals
                   </span>
+                  
+                  {/* Date Pickers */}
+                  <div className="hidden sm:flex items-center gap-2 ml-4">
+                    <input 
+                      type="date" 
+                      value={filterStartDate}
+                      onChange={(e) => setFilterStartDate(e.target.value)}
+                      className="bg-[#121620] border border-[#1b1f2e] text-xs text-slate-300 rounded px-2 py-1 focus:outline-none focus:border-indigo-500/50 w-28"
+                      title="Earliest Departure"
+                    />
+                    <span className="text-slate-500 text-xs">to</span>
+                    <input 
+                      type="date" 
+                      value={filterEndDate}
+                      onChange={(e) => setFilterEndDate(e.target.value)}
+                      className="bg-[#121620] border border-[#1b1f2e] text-xs text-slate-300 rounded px-2 py-1 focus:outline-none focus:border-indigo-500/50 w-28"
+                      title="Latest Return"
+                    />
+                    {(filterStartDate || filterEndDate) && (
+                      <button onClick={() => { setFilterStartDate(''); setFilterEndDate(''); }} className="text-[10px] text-slate-400 hover:text-white ml-1">
+                        Clear
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <button 
-                  onClick={() => setActiveTab('deals')}
+                  onClick={() => setIsGridView(!isGridView)}
                   className="text-xs font-semibold text-[#5f5af6] hover:text-[#7f7bf8] transition-colors flex items-center gap-1 cursor-pointer bg-transparent border-none"
                 >
-                  Browse all <span className="text-sm">➔</span>
+                  {isGridView ? 'View as carousel' : 'Browse all'} <span className="text-sm">➔</span>
                 </button>
               </div>
 
               {filteredDeals.length === 0 ? (
                 <div className="glass-card p-12 text-center space-y-4 w-full">
-                  <div className="text-4xl">📭</div>
-                  <h3 className="text-xl font-bold font-heading">No Deals in Budget</h3>
-                  <p className="text-slate-400 max-w-sm mx-auto">Try raising your flight budget slider on the left sidebar to see more scanned drops.</p>
+                  {scanning ? (
+                    <>
+                      <div className="text-4xl animate-pulse">🔄</div>
+                      <h3 className="text-xl font-bold font-heading text-white">Scanning for Deals…</h3>
+                      <p className="text-slate-400 max-w-sm mx-auto">The agent is searching for fare drops from {profile.airports.map(a => a.code).join(', ')}. This takes a few seconds.</p>
+                    </>
+                  ) : lastScanDealsFound === null ? (
+                    <>
+                      <div className="text-4xl">🛫</div>
+                      <h3 className="text-xl font-bold font-heading text-white">No Scan Run Yet</h3>
+                      <p className="text-slate-400 max-w-sm mx-auto">Hit the scan button to search for live fare drops from your departure airports.</p>
+                      <button onClick={triggerScan} className="btn btn-primary px-6 py-2 text-sm mx-auto">
+                        🔎 Scan Now
+                      </button>
+                    </>
+                  ) : lastScanDealsFound === 0 ? (
+                    <>
+                      <div className="text-4xl">📭</div>
+                      <h3 className="text-xl font-bold font-heading text-white">No Deals Found</h3>
+                      <p className="text-slate-400 max-w-sm mx-auto">
+                        The last scan returned no deals from {profile.airports.map(a => a.code).join(', ')}. Try switching scan engines in Settings, adding more departure airports, or scanning again later.
+                      </p>
+                      <div className="flex gap-3 justify-center pt-2">
+                        <button onClick={triggerScan} className="btn btn-primary px-5 py-2 text-xs">
+                          🔄 Scan Again
+                        </button>
+                        <button onClick={() => setActiveTab('settings')} className="btn btn-secondary px-5 py-2 text-xs">
+                          ⚙️ Change Engine
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-4xl">💰</div>
+                      <h3 className="text-xl font-bold font-heading text-white">All Deals Above Budget</h3>
+                      <p className="text-slate-400 max-w-sm mx-auto">
+                        {lastScanDealsFound} deal{lastScanDealsFound !== 1 ? 's' : ''} found but all are above your ${profile.familyProfile.budget.toLocaleString()} family budget. Raise your budget in Settings to see them.
+                      </p>
+                      <button onClick={() => setActiveTab('settings')} className="btn btn-secondary px-5 py-2 text-xs mx-auto">
+                        ⚙️ Adjust Budget
+                      </button>
+                    </>
+                  )}
                 </div>
               ) : (
-                <div className="flex gap-4 overflow-x-auto pb-4 pt-1 scrollbar-none snap-x snap-mandatory">
+                <div className={`pt-1 pb-4 ${isGridView ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4' : 'flex gap-4 overflow-x-auto scrollbar-none snap-x snap-mandatory'}`}>
                   {filteredDeals.map(deal => {
                     const isSJU = deal.destinationAirport === 'SJU';
                     const isMDE = deal.destinationAirport === 'MDE';
@@ -1676,7 +1878,7 @@ export default function App() {
                         onClick={() => setSelectedDeal(deal)}
                         onMouseEnter={() => setHoveredAirport(deal.destinationAirport)}
                         onMouseLeave={() => setHoveredAirport(null)}
-                        className={`bg-[#0e111a] border border-[#1b1f2e] rounded-2xl p-5 w-[205px] shrink-0 snap-start cursor-pointer transition-all flex flex-col justify-between h-48 relative overflow-hidden ${
+                        className={`bg-[#0e111a] border border-[#1b1f2e] rounded-2xl p-5 w-[205px] shrink-0 snap-start cursor-pointer transition-all flex flex-col justify-between h-48 relative ${
                           hoveredAirport === deal.destinationAirport || (!hoveredAirport && deal.destinationAirport === 'SJU')
                             ? 'border-indigo-500/40 shadow-[0_8px_32px_rgba(99,102,241,0.08)] scale-[1.02]' 
                             : ''
@@ -1687,7 +1889,28 @@ export default function App() {
                           <span className="text-[10px] font-bold text-slate-500 tracking-wider">
                             {deal.destinationAirport}
                           </span>
-                          {isNew ? (
+                          {deal.relevanceScore > 75 ? (
+                            <div className="group relative z-30">
+                              <span className="text-[8px] uppercase font-bold tracking-wider text-amber-300 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded flex items-center gap-1 cursor-help shadow-sm">
+                                ✨ {deal.relevanceScore}% MATCH
+                              </span>
+                              {deal.relevanceReasons && deal.relevanceReasons.length > 0 && (
+                                <div className="absolute top-full right-0 mt-2 w-64 bg-[#141824] border border-[#2d3348] text-slate-300 text-[11px] p-3 rounded-xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 pointer-events-none text-left">
+                                  <div className="font-bold text-white mb-2 text-[12px] border-b border-[#2d3348] pb-1.5 flex items-center gap-1.5">
+                                    <span>🎯</span> Why this deal is perfect:
+                                  </div>
+                                  <div className="flex flex-col gap-1.5 pt-1">
+                                    {deal.relevanceReasons.map((r, idx) => (
+                                      <div key={idx} className="flex items-start gap-1.5">
+                                        <span className="text-amber-400/80 text-[10px] mt-0.5">✦</span>
+                                        <span className="leading-snug">{r}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          ) : isNew ? (
                             <span className="text-[8px] uppercase font-bold tracking-wider text-[#10b981] bg-[#10b981]/10 px-1.5 py-0.5 rounded">
                               NEW
                             </span>
@@ -1718,6 +1941,20 @@ export default function App() {
                               {formatDateRange(deal.outboundDate, deal.returnDate)}
                             </div>
                           )}
+                          {/* Verification badge */}
+                          {deal.verified === true ? (
+                            <div className="text-[8px] text-emerald-500 font-bold mt-1.5 flex items-center gap-0.5">
+                              ✓ Live Verified
+                            </div>
+                          ) : deal.engine === 'demo' ? (
+                            <div className="text-[8px] text-slate-600 font-semibold mt-1.5">
+                              Demo price
+                            </div>
+                          ) : (
+                            <div className="text-[8px] text-amber-500 font-semibold mt-1.5">
+                              ⚠ Unverified
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -1729,7 +1966,83 @@ export default function App() {
           </section>
         )}
 
-        {/* TAB 2: SETTINGS & WALLET */}
+        {/* TAB: WISHLIST */}
+        {activeTab === 'wishlist' && (
+          <section className="animate-in fade-in duration-300 max-w-3xl mx-auto space-y-6">
+            <div className="glass-card p-6 border-indigo-500/10">
+              <h2 className="text-xl font-extrabold font-heading text-white flex items-center gap-2 mb-4">
+                ⭐ Destination Wishlist
+              </h2>
+              <p className="text-sm text-slate-400 mb-6">
+                Add bucket-list destinations here. We'll send you an immediate email alert if a deal drops for these locations. You can optionally restrict alerts to a specific month range.
+              </p>
+
+              <div className="flex flex-col md:flex-row gap-3 mb-8 bg-slate-800/20 p-4 rounded-xl border border-slate-700/50">
+                <input
+                  type="text"
+                  placeholder="Destination (e.g. Tokyo, France, HND)"
+                  value={newWishDest}
+                  onChange={e => setNewWishDest(e.target.value)}
+                  className="form-control flex-1"
+                />
+                <select
+                  value={newWishStart}
+                  onChange={e => setNewWishStart(e.target.value)}
+                  className="form-control w-full md:w-32"
+                >
+                  <option value="">Start Mth</option>
+                  {[...Array(12)].map((_, i) => <option key={i+1} value={i+1}>{new Date(0, i).toLocaleString('default', { month: 'short' })}</option>)}
+                </select>
+                <select
+                  value={newWishEnd}
+                  onChange={e => setNewWishEnd(e.target.value)}
+                  className="form-control w-full md:w-32"
+                >
+                  <option value="">End Mth</option>
+                  {[...Array(12)].map((_, i) => <option key={i+1} value={i+1}>{new Date(0, i).toLocaleString('default', { month: 'short' })}</option>)}
+                </select>
+                <button 
+                  onClick={handleAddWishlist}
+                  disabled={!newWishDest.trim()}
+                  className="btn btn-primary whitespace-nowrap"
+                >
+                  Add Alert
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <h3 className="text-sm font-bold text-slate-300 mb-2">Active Alerts ({(profile.wishlist || []).length})</h3>
+                {!(profile.wishlist?.length) ? (
+                  <div className="text-center py-8 text-slate-500 text-sm italic">
+                    No wishlist alerts configured yet.
+                  </div>
+                ) : (
+                  (profile.wishlist || []).map((item, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-4 bg-slate-800/40 rounded-xl border border-slate-700/30">
+                      <div>
+                        <div className="font-bold text-slate-200">{item.destination}</div>
+                        {(item.startMonth || item.endMonth) && (
+                          <div className="text-xs text-indigo-400 mt-1">
+                            📅 {item.startMonth ? new Date(0, item.startMonth - 1).toLocaleString('default', { month: 'long' }) : 'Any'} 
+                            {' '}to{' '} 
+                            {item.endMonth ? new Date(0, item.endMonth - 1).toLocaleString('default', { month: 'long' }) : 'Any'}
+                          </div>
+                        )}
+                      </div>
+                      <button onClick={() => handleRemoveWishlist(idx)} className="text-red-400 hover:text-red-300 p-2 rounded-lg hover:bg-red-400/10 transition-colors">
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* TAB: SETTINGS & WALLET */}
         {activeTab === 'settings' && (
           <section className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-in fade-in duration-300">
             {/* Left Column: Credit Card Wallet (2 cols wide) */}
@@ -2353,6 +2666,36 @@ export default function App() {
                       />
                     </div>
                   </div>
+                  
+                  <div className="grid grid-cols-2 gap-3 mt-4">
+                    <div className="form-group">
+                      <label className="form-label">🛂 Passport Nationality</label>
+                      <select
+                        value={profile.passportCountry || 'India'}
+                        onChange={(e) => setProfile({ ...profile, passportCountry: e.target.value })}
+                        className="form-control text-xs"
+                      >
+                        <option value="India">India</option>
+                        <option value="China">China</option>
+                        <option value="USA">United States</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">📄 US Immigration Status</label>
+                      <select
+                        value={profile.usStatus || 'Valid US Visa (B1/B2/H1/H4)'}
+                        onChange={(e) => setProfile({ ...profile, usStatus: e.target.value })}
+                        className="form-control text-xs"
+                      >
+                        <option value="US Citizen">US Citizen</option>
+                        <option value="US Green Card">US Green Card</option>
+                        <option value="Advance Parole (I-512L)">Advance Parole (I-512L)</option>
+                        <option value="Valid US Visa (B1/B2/H1/H4)">Valid US Visa (B1/B2/H1/H4)</option>
+                        <option value="Expired US Visa / No Visa">Expired US Visa / No Visa</option>
+                      </select>
+                    </div>
+                  </div>
 
                   <div className="form-group">
                     <label className="form-label">
@@ -2446,8 +2789,13 @@ export default function App() {
                 <span className="text-[10px] text-indigo-400 font-extrabold uppercase tracking-widest">
                   DEAL RADAR ANALYSIS
                 </span>
-                <h3 className="text-white text-xl font-extrabold font-heading mt-1 leading-tight">
+                <h3 className="text-white text-xl font-extrabold font-heading mt-1 leading-tight flex items-center gap-2">
                   {selectedDeal.destination}
+                  {(profile.wishlist || []).some(w => selectedDeal.destination.toLowerCase().includes(w.destination.toLowerCase())) && (
+                    <span className="text-xs bg-yellow-400/20 text-yellow-300 px-2 py-0.5 rounded-md font-bold flex items-center gap-1 border border-yellow-400/30">
+                      ⭐ Wishlist Match
+                    </span>
+                  )}
                 </h3>
               </div>
               <button 
@@ -2462,24 +2810,66 @@ export default function App() {
             <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
               
               {/* Price & Savings Header */}
-              <div className="flex justify-between items-center bg-[#131722]/80 border border-slate-900/60 p-4 rounded-xl">
-                <div>
-                  <div className="text-3xl font-black font-heading text-white">
-                    ${selectedDeal.dealPrice}
+              {(() => {
+                const passengers = profile.familyProfile.adults + profile.familyProfile.kids;
+                const familyTotal = selectedDeal.dealPrice * passengers;
+                return (
+                  <div className="bg-[#131722]/80 border border-slate-900/60 p-4 rounded-xl space-y-3">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <div className="flex items-baseline gap-2">
+                          <div className="text-3xl font-black font-heading text-white">
+                            ${selectedDeal.dealPrice}
+                          </div>
+                          <span className="text-xs text-slate-400 font-semibold">/ person</span>
+                        </div>
+                        <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider block mt-1">
+                          Normally ~${selectedDeal.normalPrice} / person
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <span className="badge badge-success text-xs px-3 py-1 font-bold">
+                          {selectedDeal.savingsPercent}% OFF
+                        </span>
+                        <div className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider mt-1.5 font-mono">
+                          {selectedDeal.departureAirport} ➔ {selectedDeal.destinationAirport}
+                        </div>
+                      </div>
+                    </div>
+                    {/* Family total */}
+                    <div className="flex items-center justify-between border-t border-slate-800/60 pt-3">
+                      <div>
+                        <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Family Total</div>
+                        <div className="text-lg font-extrabold text-emerald-400 font-heading mt-0.5">
+                          ${familyTotal.toLocaleString()}
+                        </div>
+                        <div className="text-[9px] text-slate-500 mt-0.5">
+                          {profile.familyProfile.adults} adult{profile.familyProfile.adults !== 1 ? 's' : ''}{profile.familyProfile.kids > 0 ? ` + ${profile.familyProfile.kids} kid${profile.familyProfile.kids !== 1 ? 's' : ''}` : ''} · {passengers} passengers
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Scanned At</div>
+                        <div className="text-[10px] text-amber-400 mt-0.5 font-semibold">Deal price — may vary</div>
+                        <div className="text-[9px] text-slate-600 mt-0.5">Google Flights shows live fares</div>
+                      </div>
+                    </div>
+                    {/* Verification status strip */}
+                    {selectedDeal.verified === true ? (
+                      <div className="text-[9px] text-emerald-500 font-bold flex items-center gap-1 pt-1">
+                        ✓ Live-verified price — confirmed via {selectedDeal.engine === 'kiwi' ? 'Kiwi Tequila API' : selectedDeal.engine === 'travelpayouts' ? 'Travelpayouts cache' : 'real-time search'}
+                      </div>
+                    ) : selectedDeal.engine === 'demo' ? (
+                      <div className="text-[9px] text-slate-500 italic pt-1">
+                        Demo / illustrative price — enable Kiwi or Travelpayouts engine for live verification
+                      </div>
+                    ) : (
+                      <div className="text-[9px] text-amber-500 font-semibold flex items-center gap-1 pt-1">
+                        ⚠ Price unverified — may differ from live fares
+                      </div>
+                    )}
                   </div>
-                  <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider block mt-1">
-                    Normally ~${selectedDeal.normalPrice}
-                  </span>
-                </div>
-                <div className="text-right">
-                  <span className="badge badge-success text-xs px-3 py-1 font-bold">
-                    {selectedDeal.savingsPercent}% OFF
-                  </span>
-                  <div className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider mt-1.5 font-mono">
-                    {selectedDeal.departureAirport} ➔ {selectedDeal.destinationAirport}
-                  </div>
-                </div>
-              </div>
+                );
+              })()}
 
               {/* Description */}
               <div className="space-y-2">
@@ -2533,51 +2923,101 @@ export default function App() {
                   💳 CARD WALLET PAYMENT OPTIMIZATION
                 </div>
                 
-                {calculateCardBenefits(selectedDeal.dealPrice).length > 0 ? (
-                  <div className="space-y-2">
-                    {calculateCardBenefits(selectedDeal.dealPrice).slice(0, 2).map((benefit, bIdx) => (
-                      <div key={benefit.cardName} className={`border rounded-xl p-3 flex items-center justify-between gap-4 ${
-                        bIdx === 0 ? 'bg-indigo-950/10 border-indigo-500/25' : 'bg-slate-950/20 border-slate-900/60'
-                      }`}>
-                        <div>
-                          <div className="text-xs font-bold text-slate-200">
-                            {bIdx === 0 && '👑 '}
-                            {benefit.cardName}
+                {(() => {
+                  const benefits = calculateCardBenefits(selectedDeal.dealPrice);
+                  if (benefits.length === 0) return (
+                    <p className="text-xs text-slate-500 italic">
+                      Add credit cards in the Card Wallet tab to calculate customized point rewards for this transaction.
+                    </p>
+                  );
+                  
+                  const winner = benefits[0];
+                  const others = benefits.slice(1);
+                  const familyCount = profile.familyProfile.adults + profile.familyProfile.kids;
+                  const totalPurchase = selectedDeal.dealPrice * familyCount;
+
+                  return (
+                    <div className="space-y-4">
+                      {/* WINNER CALLOUT */}
+                      <div className="bg-gradient-to-br from-indigo-900/40 to-slate-900/80 border border-indigo-500/30 rounded-2xl p-4 shadow-lg shadow-indigo-900/20 relative overflow-hidden">
+                        <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/10 rounded-full blur-2xl -mr-10 -mt-10"></div>
+                        <div className="flex justify-between items-start mb-3 relative z-10">
+                          <div>
+                            <div className="text-[10px] text-indigo-300 font-bold tracking-widest uppercase mb-1 flex items-center gap-1.5">
+                              <span>🏆</span> Best Card to Use
+                            </div>
+                            <div className="text-sm font-extrabold text-white">{winner.cardName}</div>
                           </div>
-                          <p className="text-[10px] text-slate-500 mt-1">{benefit.idealFor}</p>
+                          <div className="text-right">
+                            <div className="text-[10px] text-slate-400 font-medium">Net Effective Cost</div>
+                            <div className="text-lg font-black text-emerald-400 drop-shadow-sm">
+                              ${winner.netEffectiveCost.toLocaleString()}
+                            </div>
+                            <div className="text-[9px] text-slate-500 line-through">
+                              ${totalPurchase.toLocaleString()}
+                            </div>
+                          </div>
                         </div>
-                        <div className="text-right shrink-0">
-                          <span className="text-xs font-extrabold text-emerald-400 block">
-                            +{benefit.points.toLocaleString()} pts
-                          </span>
-                          <span className="text-[10px] text-slate-400 mt-0.5 block font-mono">
-                            Worth ~${benefit.savings} ({benefit.returnRate.toFixed(1)}% back)
-                          </span>
+                        
+                        <div className="flex items-center justify-between bg-black/40 rounded-lg p-2.5 border border-white/5 relative z-10">
+                          <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded bg-indigo-500/20 flex items-center justify-center text-indigo-300 text-xs">✨</div>
+                            <div>
+                              <div className="text-[10px] text-slate-300">Earn <span className="font-bold text-white">{winner.points.toLocaleString()} points</span></div>
+                              <div className="text-[9px] text-slate-500">{winner.idealFor}</div>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-[10px] font-bold text-emerald-400">~${winner.savings} Value</div>
+                            <div className="text-[9px] text-slate-400 font-mono">{winner.returnRate.toFixed(1)}% back</div>
+                          </div>
                         </div>
                       </div>
-                    ))}
-                    <div className="text-[9px] text-slate-500 leading-normal text-right">
-                      Calculated for family of {profile.familyProfile.adults + profile.familyProfile.kids} (Total purchase: ${(selectedDeal.dealPrice * (profile.familyProfile.adults + profile.familyProfile.kids)).toLocaleString()})
+
+                      {/* OTHER CARDS COMPARISON */}
+                      {others.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 px-1">Other Options</div>
+                          {others.map((benefit) => (
+                            <div key={benefit.cardName} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-900/40 border border-slate-800/60 hover:bg-slate-800/40 transition-colors">
+                              <div className="truncate pr-4">
+                                <div className="text-[11px] font-bold text-slate-300 truncate">{benefit.cardName}</div>
+                                <div className="text-[9px] text-slate-500 truncate">{benefit.points.toLocaleString()} pts</div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <div className="text-[11px] font-bold text-emerald-500/80">~${benefit.savings}</div>
+                                <div className="text-[9px] text-slate-500 font-mono">{benefit.returnRate.toFixed(1)}% back</div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      
+                      <div className="text-[9px] text-slate-500 leading-normal text-right px-1">
+                        *Conservative point valuations used. Based on ${totalPurchase.toLocaleString()} family spend.
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-500 italic">
-                    Add credit cards in the Card Wallet tab to calculate customized point rewards for this transaction.
-                  </p>
-                )}
+                  );
+                })()}
               </div>
 
             </div>
 
             {/* Modal Footer */}
             <div className="bg-[#0c0f16]/95 border-t border-slate-900 px-6 py-4 flex gap-3">
-              <a 
-                href={selectedDeal.bookingLink} 
-                target="_blank" 
-                rel="noreferrer" 
+              <a
+                href={(() => {
+                  const adults = profile.familyProfile.adults;
+                  const kids   = profile.familyProfile.kids;
+                  const passengerPhrase = `for ${adults} adult${adults !== 1 ? 's' : ''}${kids > 0 ? ` and ${kids} child${kids !== 1 ? 'ren' : ''}` : ''}`;
+                  const q = `Flights ${passengerPhrase} from ${selectedDeal.departureAirport} to ${selectedDeal.destinationAirport} on ${selectedDeal.outboundDate} returning ${selectedDeal.returnDate}`;
+                  return `https://www.google.com/travel/flights?q=${encodeURIComponent(q)}`;
+                })()}
+                target="_blank"
+                rel="noreferrer"
                 className="btn btn-primary flex-1 text-center py-2.5 text-xs shadow-lg shadow-indigo-600/20 leading-none flex items-center justify-center"
               >
-                BOOK FLIGHT 🛫
+                SEARCH ON GOOGLE FLIGHTS 🛫
               </a>
               <button 
                 onClick={() => {
@@ -2611,7 +3051,7 @@ export default function App() {
             <div className="text-left leading-tight hidden md:block">
               <div className="text-xs font-bold font-heading">Flight Deals</div>
               <div className={`text-[9px] mt-0.5 font-medium ${activeTab === 'deals' ? 'text-indigo-200' : 'text-slate-500'}`}>
-                {deals.length || 6} active drops
+                {deals.length} active drop{deals.length !== 1 ? 's' : ''}
               </div>
             </div>
             <span className="text-[10px] font-bold md:hidden">Deals</span>
@@ -2638,6 +3078,26 @@ export default function App() {
               <span className="text-[10px] font-bold md:hidden">Planner</span>
             </button>
           )}
+
+          <button 
+            onClick={() => setActiveTab('wishlist')} 
+            className={`flex-1 flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all border border-transparent cursor-pointer ${
+              activeTab === 'wishlist' 
+                ? 'bg-[#5f5af6] border-indigo-500/20 text-white shadow-lg shadow-indigo-600/30' 
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
+            }`}
+          >
+            <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+            </svg>
+            <div className="text-left leading-tight hidden md:block">
+              <div className="text-xs font-bold font-heading">Wishlist</div>
+              <div className={`text-[9px] mt-0.5 font-medium ${activeTab === 'wishlist' ? 'text-indigo-200' : 'text-slate-500'}`}>
+                {profile.wishlist ? profile.wishlist.length : 0} alerts
+              </div>
+            </div>
+            <span className="text-[10px] font-bold md:hidden">Wishlist</span>
+          </button>
 
           <button 
             onClick={() => setActiveTab('settings')} 

@@ -27,9 +27,22 @@ Built using a **pure serverless architecture**, AeroFamily is fully ready for de
     *   *Chase Sapphire Preferred* (2x points on travel, 2.0¢ average value)
 *   **Net Return Rate Calculations**: Dynamically computes the **Net Return Rate** and exact cash value of rewards earned on the flight transaction to identify the optimal card to swipe.
 
-### 4. Deep Generative Travel Research (Gemini Agent)
+### 4. Destination Wishlist Alerts
+*   **Set and Forget**: Track bucket-list travel destinations with optional target month ranges.
+*   **Targeted Background Scans**: The daily background daemon searches for generic cache deals and immediately checks them against your active wishlist.
+*   **Email Notifications**: Dispatches an instant email via `nodemailer` if a live price drop matches a saved wishlist destination, guarded by a smart 24-hour anti-spam cooldown.
+
+### 5. Passport & Visa Guard
+*   **Citizenship Aware**: Tracks user's home passport and current US Immigration status (e.g., B1/B2, H-1B, Advance Parole).
+*   **Third-Country Transit Check**: Automatically flags deals requiring transit visas for specific layover countries, ensuring families never get stuck at the border.
+
+### 6. Deep Generative Travel Research (Gemini Agent)
 *   **5-Day Custom Itineraries**: Connects with Gemini to draft detailed day-by-day travel plans customized to the family's profile, budget, interests (e.g., Beach, Kid-Friendly), and safety ratings.
 *   **Shared Itinerary Caching**: Caches markdown itineraries under isolated Firestore hashes to eliminate redundant Gemini API invocation costs.
+
+### 7. Marketing Onboarding Funnel
+*   **Premium Landing Page**: A fully responsive, scrollable marketing funnel that hooks users by selling the primary value propositions before they ever reach the login gate.
+*   **Glassmorphic Design**: Utilizes beautiful dark-mode glassmorphic cards and dynamic text gradients.
 
 ### 5. Multi-Tenant Google Authentication & Cloud Firestore
 *   **Secure Google Sign-In**: Authenticates users via the Google Identity Services JWT SDK.
