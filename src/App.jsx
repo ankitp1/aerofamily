@@ -475,12 +475,23 @@ export default function App() {
   const [showAwModal, setShowAwModal]            = useState(false);
   const [walletError, setWalletError]            = useState('');
 
+  // Award vs Cash affordability verdict
+  const [dealAffordability, setDealAffordability] = useState(null);
+  const [fetchingAffordability, setFetchingAffordability] = useState(false);
+
   // Load wallet status + cached balances on mount (after profile loads)
   useEffect(() => {
     if (!isLoggedIn) return;
     fetchWalletStatus();
     fetchManualBalances();
   }, [isLoggedIn]);
+
+  useEffect(() => {
+    if (selectedDeal && isLoggedIn) {
+      setDealAffordability(null);
+      fetchAffordability(selectedDeal);
+    }
+  }, [selectedDeal, isLoggedIn]);
 
   const authHeaders = () => ({
     'Content-Type': 'application/json',
@@ -568,6 +579,33 @@ export default function App() {
       await fetch(`${BACKEND_URL}/api/wallet/manual/${accountId}`, { method: 'DELETE', headers: authHeaders() });
       await fetchManualBalances();
     } catch { /* refetch on next load */ }
+  }
+
+  async function fetchAffordability(deal) {
+    if (!deal) return;
+    setFetchingAffordability(true);
+    try {
+      const passengers = profile.familyProfile.adults + profile.familyProfile.kids;
+      const resp = await fetch(`${BACKEND_URL}/api/wallet/affordability`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          dealPrice: deal.dealPrice,
+          passengers,
+          origin: deal.departureAirport,
+          destination: deal.destinationAirport,
+          cabin: 'economy',
+        }),
+      });
+      const data = await resp.json();
+      if (resp.ok) {
+        setDealAffordability(data);
+      }
+    } catch (err) {
+      console.warn('Could not fetch affordability data:', err.message);
+    } finally {
+      setFetchingAffordability(false);
+    }
   }
 
   // Simulate Plaid Link: request link token → show modal → on "connect" exchange token
@@ -3106,6 +3144,74 @@ export default function App() {
                     backendUrl={BACKEND_URL}
                     authHeaders={authHeaders()}
                   />
+                );
+              })()}
+
+              {/* Award vs Cash Verdict */}
+              {dealAffordability && (() => {
+                const passengers = profile.familyProfile.adults + profile.familyProfile.kids;
+                const { totalCash, report, liveAward } = dealAffordability;
+
+                // Find Delta award result if available
+                const deltaReport = report?.find(r => r.program_id === 'delta_skymiles');
+
+                // Calculate card earnings
+                const cardBenefits = calculateCardBenefits(selectedDeal.dealPrice);
+                const bestCard = cardBenefits[0];
+
+                let verdict = null;
+                let verdictEmoji = '';
+                let verdictColor = '';
+                let recommendation = '';
+
+                if (deltaReport && deltaReport.can_afford && liveAward) {
+                  // Award is affordable
+                  const awardDollarValue = (deltaReport.miles_needed * parseFloat(deltaReport.value_per_mile.slice(0, -1))) / 100;
+                  const awardTotalCost = awardDollarValue + (deltaReport.taxes_usd || 0);
+
+                  if (bestCard) {
+                    const cardEffectiveCost = totalCash - bestCard.savings;
+                    if (awardTotalCost < cardEffectiveCost) {
+                      verdict = `Book with award miles`;
+                      verdictEmoji = '⭐';
+                      verdictColor = 'text-yellow-400 border-yellow-500/30 bg-yellow-950/20';
+                      recommendation = `Saves $${(cardEffectiveCost - awardTotalCost).toFixed(0)} vs best card`;
+                    } else {
+                      verdict = `Best card: ${bestCard.cardName}`;
+                      verdictEmoji = '💳';
+                      verdictColor = 'text-indigo-400 border-indigo-500/30 bg-indigo-950/20';
+                      recommendation = `Saves $${(awardTotalCost - cardEffectiveCost).toFixed(0)} vs award miles`;
+                    }
+                  } else {
+                    verdict = `Book with award miles`;
+                    verdictEmoji = '⭐';
+                    verdictColor = 'text-yellow-400 border-yellow-500/30 bg-yellow-950/20';
+                    recommendation = `${deltaReport.miles_needed.toLocaleString()} miles covers it`;
+                  }
+                } else if (bestCard) {
+                  verdict = `Best card: ${bestCard.cardName}`;
+                  verdictEmoji = '💳';
+                  verdictColor = 'text-indigo-400 border-indigo-500/30 bg-indigo-950/20';
+                  recommendation = `Earn ~${bestCard.points.toLocaleString()} points (~$${bestCard.savings})`;
+                } else {
+                  verdict = 'Book with cash';
+                  verdictEmoji = '💵';
+                  verdictColor = 'text-emerald-400 border-emerald-500/30 bg-emerald-950/20';
+                  recommendation = `Total: $${totalCash.toLocaleString()} (${passengers} pax)`;
+                }
+
+                return (
+                  <div className={`border rounded-xl p-3 flex items-start gap-3 ${verdictColor}`}>
+                    <div className="text-xl mt-0.5">{verdictEmoji}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className={`text-xs font-extrabold uppercase tracking-wider ${verdictColor.split(' ').find(c => c.startsWith('text-'))}`}>
+                        {verdict}
+                      </div>
+                      <div className="text-[10px] text-slate-300 mt-1 leading-snug">
+                        {recommendation}
+                      </div>
+                    </div>
+                  </div>
                 );
               })()}
 
