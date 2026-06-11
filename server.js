@@ -24,7 +24,7 @@ import {
   disconnectPlaid,
   SIMULATOR_MODE as isPlaidSimulator,
 } from './plaidService.js';
-import { searchDeltaAwards } from './deltaAwardSearch.js';
+import { searchDeltaAwards, extractAwardPricing } from './deltaAwardSearch.js';
 import {
   connectAwardWalletAccount,
   getAwardWalletBalances,
@@ -32,6 +32,12 @@ import {
   computeAwardAffordability,
   AW_SIMULATOR_MODE,
 } from './awardWalletService.js';
+import {
+  listManualBalances,
+  upsertManualBalance,
+  deleteManualBalance,
+} from './manualWalletService.js';
+import { DEFAULT_LOYALTY_PROGRAMS } from './loyaltyPrograms.js';
 import { readFile } from 'fs/promises';
 
 // Load environmental variables
@@ -461,8 +467,7 @@ app.post('/api/scan', async (req, res) => {
     }
 
     // 3. User-Specific Budget Filtering — compare family TOTAL cost vs budget
-    const userEmail = profile.email || null;
-    const loyaltyBalances = await getAwardWalletBalances(userId, db, userEmail);
+    const loyaltyBalances = await getAwardWalletBalances(userId, db);
 
     const activeDeals = allDeals.filter(d => {
       return d.dealPrice * totalPassengers <= familyBudget;
@@ -604,16 +609,17 @@ app.post('/api/research', async (req, res) => {
 // WALLET: PLAID & AWARDWALLET INTEGRATION ENDPOINTS
 // ----------------------------------------------------
 
-// Helper: load loyalty_programs.json once (cached in memory)
+// Helper: built-in program catalog, optionally overridden by a local
+// data/loyalty_programs.json (gitignored). Cached in memory after first load.
 let _loyaltyPrograms = null;
 async function getLoyaltyPrograms() {
   if (_loyaltyPrograms) return _loyaltyPrograms;
+  let overrides = {};
   try {
     const raw = await readFile(path.join(__dirname, 'data', 'loyalty_programs.json'), 'utf8');
-    _loyaltyPrograms = JSON.parse(raw);
-  } catch (_) {
-    _loyaltyPrograms = {};
-  }
+    overrides = JSON.parse(raw);
+  } catch (_) { /* override file is optional */ }
+  _loyaltyPrograms = { ...DEFAULT_LOYALTY_PROGRAMS, ...overrides };
   return _loyaltyPrograms;
 }
 
@@ -707,16 +713,47 @@ app.post('/api/awardwallet/connect', async (req, res) => {
   }
 });
 
-// GET /api/awardwallet/balances — fetch airline/hotel loyalty mile balances
+// GET /api/awardwallet/balances — manual + synced loyalty balances, merged
 app.get('/api/awardwallet/balances', async (req, res) => {
-  const userId    = req.user ? req.user.id : 'guest';
-  const userEmail = req.user ? req.user.email : null;
+  const userId = req.user ? req.user.id : 'guest';
   try {
-    const balances  = await getAwardWalletBalances(userId, db, userEmail);
+    const balances  = await getAwardWalletBalances(userId, db);
     const loyaltyPg = await getLoyaltyPrograms();
     res.json({ balances, simulatorMode: AW_SIMULATOR_MODE(), programs: loyaltyPg });
   } catch (err) {
     console.error('[AwardWallet] balances error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/wallet/manual — manually tracked loyalty balances + program catalog
+app.get('/api/wallet/manual', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
+  try {
+    const balances = await listManualBalances(userId, db);
+    res.json({ balances, programs: await getLoyaltyPrograms() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/wallet/manual — add or update a manual balance entry
+app.post('/api/wallet/manual', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
+  try {
+    const saved = await upsertManualBalance(userId, db, req.body || {});
+    res.json({ success: true, balance: saved });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// DELETE /api/wallet/manual/:accountId — remove a manual balance entry
+app.delete('/api/wallet/manual/:accountId', async (req, res) => {
+  const userId = req.user ? req.user.id : 'guest';
+  try {
+    res.json(await deleteManualBalance(userId, db, req.params.accountId));
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
@@ -753,19 +790,37 @@ app.delete('/api/awardwallet/disconnect', async (req, res) => {
   }
 });
 
-// POST /api/wallet/affordability — given a deal price, compute award coverage
+// POST /api/wallet/affordability — given a deal, compute award coverage.
+// When origin/destination are provided, real award pricing (seats.aero or
+// Gemini) is used for the matching program instead of a ¢/mile estimate.
 app.post('/api/wallet/affordability', async (req, res) => {
   const userId = req.user ? req.user.id : 'guest';
-  const { dealPrice, passengers } = req.body;
+  const { dealPrice, passengers, origin, destination, cabin } = req.body;
   if (!dealPrice) return res.status(400).json({ error: 'dealPrice required' });
 
   try {
-    const userEmail  = req.user ? req.user.email : null;
-    const totalCash  = dealPrice * (passengers || 1);
-    const loyaltyBal = await getAwardWalletBalances(userId, db, userEmail);
+    const pax       = passengers || 1;
+    const totalCash = dealPrice * pax;
+
+    let liveAward = null;
+    if (origin && destination) {
+      try {
+        const award = await searchDeltaAwards(
+          String(origin).toUpperCase(),
+          String(destination).toUpperCase(),
+          cabin || 'economy',
+          90
+        );
+        liveAward = extractAwardPricing(award, cabin || 'economy');
+      } catch (err) {
+        console.warn('[Affordability] Live award lookup failed, using estimates:', err.message);
+      }
+    }
+
+    const loyaltyBal = await getAwardWalletBalances(userId, db);
     const loyaltyPg  = await getLoyaltyPrograms();
-    const report     = computeAwardAffordability(totalCash, loyaltyBal, loyaltyPg);
-    res.json({ totalCash, report });
+    const report     = computeAwardAffordability(totalCash, loyaltyBal, loyaltyPg, { liveAward, passengers: pax });
+    res.json({ totalCash, passengers: pax, liveAward, report });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

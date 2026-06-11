@@ -24,15 +24,26 @@ vi.mock('firebase-admin', () => {
     });
   });
 
-  const setDoc = vi.fn().mockImplementation(function(path, data) {
-    docStore[path] = data;
+  const setDoc = vi.fn().mockImplementation(function(path, data, options) {
+    // Mirror Firestore merge semantics one level deep (enough for wallet.* writes)
+    if (options?.merge && docStore[path]) {
+      const merged = { ...docStore[path] };
+      for (const [key, val] of Object.entries(data)) {
+        merged[key] = (val && typeof val === 'object' && !Array.isArray(val) && typeof merged[key] === 'object')
+          ? { ...merged[key], ...val }
+          : val;
+      }
+      docStore[path] = merged;
+    } else {
+      docStore[path] = data;
+    }
     return Promise.resolve();
   });
 
   // Setup Firestore document reference chaining mock
   const docMock = (path) => ({
     get: () => getDoc(path),
-    set: (data) => setDoc(path, data)
+    set: (data, options) => setDoc(path, data, options)
   });
 
   const collectionMock = (colName) => ({

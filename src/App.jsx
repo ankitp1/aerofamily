@@ -175,7 +175,7 @@ function MarkdownRenderer({ markdown }) {
 // ---------------------------------------------------------------------------
 // Delta Award Search Panel — shown inside the deal detail modal
 // ---------------------------------------------------------------------------
-function DeltaAwardSearchPanel({ deal, awBalances, backendUrl, authHeaders }) {
+function DeltaAwardSearchPanel({ deal, awBalances, backendUrl, authHeaders, passengers = 1 }) {
   const [awardData, setAwardData]   = useState(null);
   const [searching, setSearching]   = useState(false);
   const [searchError, setSearchError] = useState('');
@@ -275,25 +275,28 @@ function DeltaAwardSearchPanel({ deal, awBalances, backendUrl, authHeaders }) {
             <p className="text-xs text-slate-400 italic">{awardData.message || 'No award space found.'}</p>
           ) : (
             <div className="space-y-2">
-              {/* seats.aero results — date-by-date */}
+              {/* seats.aero results — date-by-date, priced for the whole family */}
               {awardData.source === 'seats.aero' && awardData.results?.slice(0, 5).map((r, i) => {
-                const canAfford = combinedMiles >= r.miles;
+                const familyMiles = r.miles * passengers;
+                const canAfford = combinedMiles >= familyMiles;
                 return (
                   <div key={i} className={`rounded-lg border px-3 py-2 flex items-center justify-between ${
                     canAfford ? 'border-emerald-800/40 bg-emerald-950/10' : 'border-slate-800/60 bg-slate-900/30'
                   }`}>
                     <div>
                       <div className="text-xs font-bold text-white">{r.date} · <span className="capitalize text-slate-300">{r.cabin}</span></div>
-                      <div className="text-[9px] text-slate-500 mt-0.5">{r.route} · +${r.taxes_usd} taxes</div>
+                      <div className="text-[9px] text-slate-500 mt-0.5">{r.route} · +${r.taxes_usd} taxes/person</div>
                     </div>
                     <div className="text-right">
                       <div className={`text-sm font-extrabold font-heading ${cabinColors[r.cabin] || 'text-white'}`}>
-                        {r.miles?.toLocaleString()}
+                        {familyMiles.toLocaleString()}
                       </div>
-                      <div className="text-[9px] text-slate-500">miles</div>
+                      <div className="text-[9px] text-slate-500">
+                        miles{passengers > 1 ? ` · ${r.miles?.toLocaleString()} × ${passengers} travelers` : ''}
+                      </div>
                       {canAfford
-                        ? <div className="text-[9px] text-emerald-400 mt-0.5">✓ You can book</div>
-                        : <div className="text-[9px] text-rose-400 mt-0.5">Need {(r.miles - combinedMiles).toLocaleString()} more</div>
+                        ? <div className="text-[9px] text-emerald-400 mt-0.5">✓ Family can book</div>
+                        : <div className="text-[9px] text-rose-400 mt-0.5">Need {(familyMiles - combinedMiles).toLocaleString()} more</div>
                       }
                     </div>
                   </div>
@@ -302,7 +305,8 @@ function DeltaAwardSearchPanel({ deal, awBalances, backendUrl, authHeaders }) {
 
               {/* Gemini / demo results — cabin range view */}
               {(awardData.source === 'gemini' || awardData.source === 'demo') && awardData.results?.map((r, i) => {
-                const milesNeeded = r.miles_low || r.miles_needed;
+                const perPerson   = r.miles_low || r.miles_needed;
+                const milesNeeded = perPerson * passengers;
                 const canAfford   = combinedMiles >= milesNeeded;
                 return (
                   <div key={i} className={`rounded-lg border px-3 py-2 flex items-center justify-between ${
@@ -319,9 +323,11 @@ function DeltaAwardSearchPanel({ deal, awBalances, backendUrl, authHeaders }) {
                         {r.miles_low?.toLocaleString()}
                         {r.miles_high && r.miles_high !== r.miles_low && <span className="text-xs font-normal text-slate-400">–{r.miles_high?.toLocaleString()}</span>}
                       </div>
-                      <div className="text-[9px] text-slate-500">miles {r.typical_taxes_usd ? `+$${r.typical_taxes_usd} taxes` : ''}</div>
+                      <div className="text-[9px] text-slate-500">
+                        miles/person{passengers > 1 ? ` · ${milesNeeded.toLocaleString()} for ${passengers}` : ''} {r.typical_taxes_usd ? `+$${r.typical_taxes_usd} taxes` : ''}
+                      </div>
                       {canAfford
-                        ? <div className="text-[9px] text-emerald-400 mt-0.5">✓ You can book</div>
+                        ? <div className="text-[9px] text-emerald-400 mt-0.5">✓ Family can book</div>
                         : <div className="text-[9px] text-rose-400 mt-0.5">Need {(milesNeeded - combinedMiles).toLocaleString()} more</div>
                       }
                     </div>
@@ -455,10 +461,14 @@ export default function App() {
     }
   }, [profile]);
 
-  // ── Wallet: Plaid + AwardWallet state ───────────────────────────────────
+  // ── Wallet: Plaid + AwardWallet + manual balances state ─────────────────
   const [walletStatus, setWalletStatus]         = useState({ plaid: {}, awardwallet: {} });
   const [plaidBalances, setPlaidBalances]        = useState([]);
   const [awBalances, setAwBalances]              = useState([]);
+  const [manualBalances, setManualBalances]      = useState([]);
+  const [programCatalog, setProgramCatalog]      = useState({});
+  const [manualForm, setManualForm]              = useState(null); // null = closed
+  const [savingManual, setSavingManual]          = useState(false);
   const [syncingPlaid, setSyncingPlaid]          = useState(false);
   const [syncingAW, setSyncingAW]                = useState(false);
   const [showPlaidModal, setShowPlaidModal]      = useState(false);
@@ -469,6 +479,7 @@ export default function App() {
   useEffect(() => {
     if (!isLoggedIn) return;
     fetchWalletStatus();
+    fetchManualBalances();
   }, [isLoggedIn]);
 
   const authHeaders = () => ({
@@ -509,12 +520,54 @@ export default function App() {
     try {
       const resp = await fetch(`${BACKEND_URL}/api/awardwallet/balances`, { headers: authHeaders() });
       const data = await resp.json();
-      if (data.balances) setAwBalances(data.balances);
+      // The endpoint returns manual + synced merged; manual entries render in their own panel
+      if (data.balances) setAwBalances(data.balances.filter(b => b.source !== 'manual'));
+      if (data.programs) setProgramCatalog(data.programs);
     } catch (e) {
       setWalletError('Failed to fetch loyalty balances. Try again.');
     } finally {
       setSyncingAW(false);
     }
+  }
+
+  async function fetchManualBalances() {
+    try {
+      const resp = await fetch(`${BACKEND_URL}/api/wallet/manual`, { headers: authHeaders() });
+      if (resp.ok) {
+        const data = await resp.json();
+        setManualBalances(data.balances || []);
+        if (data.programs) setProgramCatalog(data.programs);
+      }
+    } catch { /* panel simply stays empty */ }
+  }
+
+  async function saveManualBalance() {
+    if (!manualForm) return;
+    setSavingManual(true);
+    setWalletError('');
+    try {
+      const resp = await fetch(`${BACKEND_URL}/api/wallet/manual`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify(manualForm),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Save failed');
+      setManualForm(null);
+      await fetchManualBalances();
+    } catch (e) {
+      setWalletError(e.message || 'Could not save balance.');
+    } finally {
+      setSavingManual(false);
+    }
+  }
+
+  async function deleteManualEntry(accountId) {
+    if (!confirm('Remove this balance entry?')) return;
+    try {
+      await fetch(`${BACKEND_URL}/api/wallet/manual/${accountId}`, { method: 'DELETE', headers: authHeaders() });
+      await fetchManualBalances();
+    } catch { /* refetch on next load */ }
   }
 
   // Simulate Plaid Link: request link token → show modal → on "connect" exchange token
@@ -2094,12 +2147,23 @@ export default function App() {
                       {plaidBalances.length > 0 && (
                         <div className="flex items-baseline gap-1.5 mt-1">
                           <span className="text-lg font-extrabold text-emerald-400 font-heading">
-                            {plaidBalances[0].balance.toLocaleString()}
+                            {plaidBalances[0].balanceLabel === 'USD'
+                              ? `$${plaidBalances[0].balance.toLocaleString()}`
+                              : plaidBalances[0].balance.toLocaleString()}
                           </span>
-                          <span className="text-[10px] text-slate-400">{plaidBalances[0].balanceLabel}</span>
-                          <span className="text-[9px] text-slate-500 ml-1">
-                            ≈ ${Math.round(plaidBalances[0].balance * 0.018).toLocaleString()} value
+                          <span className="text-[10px] text-slate-400">
+                            {plaidBalances[0].balanceLabel === 'USD' ? 'statement balance' : plaidBalances[0].balanceLabel}
                           </span>
+                          {plaidBalances[0].balanceLabel !== 'USD' && (
+                            <span className="text-[9px] text-slate-500 ml-1">
+                              ≈ ${Math.round(plaidBalances[0].balance * 0.018).toLocaleString()} value
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {plaidBalances[0]?.rewardsUnavailable && (
+                        <div className="text-[9px] text-amber-500 mt-0.5">
+                          Plaid can't access rewards balances — track points in Manual Balances below.
                         </div>
                       )}
                       {plaidBalances[0]?.lastSyncedAt && (
@@ -2233,35 +2297,156 @@ export default function App() {
                   )}
                 </div>
 
+                {/* Manual loyalty balances — primary source, no aggregator needed */}
+                <div className="rounded-xl border border-slate-700/40 bg-slate-900/30">
+                  <div className="flex items-center justify-between gap-4 p-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-9 h-9 rounded-lg flex items-center justify-center text-base flex-shrink-0 bg-slate-800/60">
+                        ✍️
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-sm font-bold text-white font-heading">Manual Balances</div>
+                        <div className="text-[10px] text-slate-400">
+                          Track any program in 30 seconds — no bank login needed
+                        </div>
+                      </div>
+                    </div>
+                    {!manualForm && (
+                      <button
+                        onClick={() => setManualForm({ program_id: 'delta_skymiles', member_label: '', balance: '' })}
+                        className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-indigo-600 hover:bg-indigo-700 text-white transition-all shadow-sm flex-shrink-0"
+                      >
+                        ＋ Add Balance
+                      </button>
+                    )}
+                  </div>
+
+                  {manualBalances.length > 0 && (
+                    <div className="border-t border-slate-800/60 px-4 pb-3 pt-2 grid grid-cols-2 gap-2">
+                      {manualBalances.map((acct) => (
+                        <div key={acct.account_id} className="bg-slate-900/60 rounded-lg px-3 py-2 relative group">
+                          <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold mb-0.5 pr-10">
+                            {acct.program_name}{acct.member_label ? ` · ${acct.member_label}` : ''}
+                          </div>
+                          <div className="flex items-baseline gap-1">
+                            <span className="text-sm font-extrabold text-white font-heading">
+                              {acct.balance.toLocaleString()}
+                            </span>
+                            <span className="text-[9px] text-slate-400">{acct.balanceLabel}</span>
+                          </div>
+                          <div className={`text-[9px] mt-0.5 ${acct.stale ? 'text-amber-400 font-bold' : 'text-slate-500'}`}>
+                            {acct.stale && '⚠ '}Updated {formatSyncedAgo(acct.updatedAt)}{acct.stale && ' — refresh?'}
+                          </div>
+                          <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={() => setManualForm({
+                                account_id: acct.account_id,
+                                program_id: acct.program_id,
+                                member_label: acct.member_label,
+                                balance: acct.balance,
+                              })}
+                              className="w-5 h-5 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-[10px] flex items-center justify-center"
+                              title="Edit balance"
+                            >
+                              ✎
+                            </button>
+                            <button
+                              onClick={() => deleteManualEntry(acct.account_id)}
+                              className="w-5 h-5 rounded bg-slate-800 hover:bg-rose-900/60 text-slate-400 hover:text-rose-300 text-[11px] flex items-center justify-center"
+                              title="Remove entry"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {manualForm && (
+                    <div className="border-t border-slate-800/60 p-4 space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <select
+                          value={manualForm.program_id}
+                          onChange={(e) => setManualForm({ ...manualForm, program_id: e.target.value })}
+                          className="form-control text-xs w-full"
+                        >
+                          {Object.entries(programCatalog).map(([id, p]) => (
+                            <option key={id} value={id}>{p.program_name}</option>
+                          ))}
+                        </select>
+                        <input
+                          type="text"
+                          placeholder="Member (e.g. Spouse)"
+                          value={manualForm.member_label}
+                          onChange={(e) => setManualForm({ ...manualForm, member_label: e.target.value })}
+                          className="form-control text-xs w-full"
+                        />
+                      </div>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="Current balance (e.g. 182490)"
+                        value={manualForm.balance}
+                        onChange={(e) => setManualForm({ ...manualForm, balance: e.target.value })}
+                        className="form-control text-xs w-full"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={saveManualBalance}
+                          disabled={savingManual || manualForm.balance === ''}
+                          className="flex-1 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all disabled:opacity-50"
+                        >
+                          {savingManual ? 'Saving…' : manualForm.account_id ? 'Update Balance' : 'Save Balance'}
+                        </button>
+                        <button
+                          onClick={() => setManualForm(null)}
+                          className="px-4 py-2 rounded-lg text-xs font-bold text-slate-400 hover:text-white border border-slate-700 transition-all"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {/* Combined value summary bar */}
-                {(plaidBalances.length > 0 || awBalances.length > 0) && (
+                {(plaidBalances.length > 0 || awBalances.length > 0 || manualBalances.length > 0) && (() => {
+                  const cardMiles = plaidBalances.filter(b => b.balanceLabel !== 'USD');
+                  const loyaltyAll = [...manualBalances, ...awBalances];
+                  const valueOf = (b, fallbackCents) => {
+                    const cents = programCatalog[b.program_id]?.valuation_cents_per_mile || fallbackCents;
+                    return b.balance * cents / 100;
+                  };
+                  return (
                   <div className="flex gap-3 pt-1">
                     <div className="flex-1 bg-slate-900/60 border border-slate-800/60 rounded-lg px-3 py-2 text-center">
                       <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Total Card Miles</div>
                       <div className="text-sm font-extrabold text-white font-heading mt-0.5">
-                        {plaidBalances.reduce((s, b) => s + b.balance, 0).toLocaleString()}
+                        {cardMiles.reduce((s, b) => s + b.balance, 0).toLocaleString()}
                       </div>
                       <div className="text-[9px] text-slate-500">Capital One Miles</div>
                     </div>
                     <div className="flex-1 bg-slate-900/60 border border-slate-800/60 rounded-lg px-3 py-2 text-center">
-                      <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Family Delta Miles</div>
+                      <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Family Loyalty Miles</div>
                       <div className="text-sm font-extrabold text-white font-heading mt-0.5">
-                        {awBalances.reduce((s, b) => s + b.balance, 0).toLocaleString()}
+                        {loyaltyAll.reduce((s, b) => s + b.balance, 0).toLocaleString()}
                       </div>
-                      <div className="text-[9px] text-slate-500">{awBalances.length} account{awBalances.length !== 1 ? 's' : ''} combined</div>
+                      <div className="text-[9px] text-slate-500">{loyaltyAll.length} account{loyaltyAll.length !== 1 ? 's' : ''} combined</div>
                     </div>
                     <div className="flex-1 bg-indigo-950/30 border border-indigo-800/30 rounded-lg px-3 py-2 text-center">
                       <div className="text-[9px] uppercase tracking-wider text-indigo-400 font-bold">Est. Total Value</div>
                       <div className="text-sm font-extrabold text-indigo-300 font-heading mt-0.5">
                         ${(
-                          plaidBalances.reduce((s, b) => s + b.balance * 0.018, 0) +
-                          awBalances.reduce((s, b) => s + b.balance * 0.012, 0)
+                          cardMiles.reduce((s, b) => s + valueOf(b, 1.8), 0) +
+                          loyaltyAll.reduce((s, b) => s + valueOf(b, 1.2), 0)
                         ).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                       </div>
                       <div className="text-[9px] text-indigo-500">at standard valuations</div>
                     </div>
                   </div>
-                )}
+                  );
+                })()}
               </div>
               {/* ── END SYNCED REWARDS PANEL ──────────────────────────────── */}
 
@@ -2353,7 +2538,8 @@ export default function App() {
                         />
                       </div>
                       <div className="bg-amber-950/30 border border-amber-800/30 rounded-lg px-3 py-2 text-[10px] text-amber-400">
-                        ⚡ Simulator Mode — syncs your account (182,490 miles) + spouse's account (124,000 miles).
+                        ⚡ Simulator Mode — links a demo SkyMiles account (25,000 miles). For real numbers,
+                        add your family's balances under Manual Balances — they always take priority.
                       </div>
                       <button
                         onClick={confirmAwConnect}
@@ -2907,15 +3093,21 @@ export default function App() {
                 </div>
               )}
 
-              {/* Delta Award Search */}
-              {awBalances.length > 0 && (
-                <DeltaAwardSearchPanel
-                  deal={selectedDeal}
-                  awBalances={awBalances}
-                  backendUrl={BACKEND_URL}
-                  authHeaders={authHeaders()}
-                />
-              )}
+              {/* Delta Award Search — fed by manual + synced Delta balances */}
+              {(() => {
+                const deltaBalances = [...manualBalances, ...awBalances]
+                  .filter(b => b.program_id === 'delta_skymiles' || b.airline_code === 'DL');
+                if (deltaBalances.length === 0) return null;
+                return (
+                  <DeltaAwardSearchPanel
+                    deal={selectedDeal}
+                    awBalances={deltaBalances}
+                    passengers={profile.familyProfile.adults + profile.familyProfile.kids}
+                    backendUrl={BACKEND_URL}
+                    authHeaders={authHeaders()}
+                  />
+                );
+              })()}
 
               {/* Card Wallet Recommender */}
               <div className="border-t border-slate-900 pt-4 space-y-3">

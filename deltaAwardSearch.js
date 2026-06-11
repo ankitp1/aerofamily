@@ -51,6 +51,48 @@ export async function searchDeltaAwards(origin, destination, cabinClass = null, 
   return _demoResult(origin, destination);
 }
 
+/**
+ * Distills a searchDeltaAwards() result into per-passenger pricing for one
+ * cabin, usable by the affordability engine. Returns null when no priced
+ * award was found for that cabin.
+ *
+ * @param {object} searchResult - return value of searchDeltaAwards()
+ * @param {string} [cabin='economy']
+ * @returns {{ program_id, cabin, miles_per_passenger, miles_high_per_passenger, taxes_usd_per_passenger, date, source } | null}
+ */
+export function extractAwardPricing(searchResult, cabin = 'economy') {
+  if (!searchResult?.found) return null;
+
+  if (searchResult.source === 'seats.aero') {
+    // results are sorted cheapest-first; cheapest covers the no-match case
+    const slot = (searchResult.results || []).find(r => (r.cabin || 'economy') === cabin)
+      || searchResult.cheapest;
+    if (!slot?.miles) return null;
+    return {
+      program_id:               'delta_skymiles',
+      cabin:                    slot.cabin || cabin,
+      miles_per_passenger:      slot.miles,
+      miles_high_per_passenger: null,
+      taxes_usd_per_passenger:  slot.taxes_usd || 0,
+      date:                     slot.date || null,
+      source:                   'seats.aero',
+    };
+  }
+
+  // Gemini / demo shape: results[] carries miles_low/miles_high ranges per cabin
+  const range = (searchResult.results || []).find(r => r.cabin === cabin);
+  if (!range?.miles_low) return null;
+  return {
+    program_id:               'delta_skymiles',
+    cabin,
+    miles_per_passenger:      range.miles_low,
+    miles_high_per_passenger: range.miles_high || null,
+    taxes_usd_per_passenger:  range.typical_taxes_usd || 0,
+    date:                     null,
+    source:                   searchResult.source,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // seats.aero Partner API
 // ---------------------------------------------------------------------------

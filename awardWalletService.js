@@ -8,6 +8,8 @@
  * All requests use Bearer token auth: Authorization: Bearer <AWARDWALLET_API_KEY>
  */
 
+import { withStaleness, loadWallet } from './manualWalletService.js';
+
 const AW_BASE_URL = 'https://api.awardwallet.com/v1';
 
 // Lazy — read at call time so dotenv has already loaded.
@@ -19,44 +21,8 @@ function getAwKey() {
   return process.env.AWARDWALLET_API_KEY;
 }
 
-// ---------------------------------------------------------------------------
-// Personal account data — only returned for the owner's email address.
-// All other users get the generic empty simulator state.
-// ---------------------------------------------------------------------------
-const OWNER_EMAIL = 'ankitp1@gmail.com';
-
-const OWNER_LOYALTY_BALANCES = [
-  {
-    account_id:     'delta_primary',
-    program_id:     'delta_skymiles',
-    program_name:   'Delta SkyMiles',
-    airline_code:   'DL',
-    member_label:   'Your Account',
-    account_number: '••••••••4521',
-    balance:        182490,
-    balanceLabel:   'miles',
-    expiresAt:      null,
-    lastSyncedAt:   new Date().toISOString(),
-    status:         'active',
-    tier:           null,
-  },
-  {
-    account_id:     'delta_spouse',
-    program_id:     'delta_skymiles',
-    program_name:   'Delta SkyMiles',
-    airline_code:   'DL',
-    member_label:   "Spouse's Account",
-    account_number: '••••••••8834',
-    balance:        124000,
-    balanceLabel:   'miles',
-    expiresAt:      null,
-    lastSyncedAt:   new Date().toISOString(),
-    status:         'active',
-    tier:           null,
-  },
-];
-
-// Generic demo data shown to non-owner users in simulator mode
+// Generic demo data shown in simulator mode until the user adds real
+// balances (manually in Settings, or via a live AwardWallet sync).
 const DEMO_LOYALTY_BALANCES = [
   {
     account_id:     'demo_delta_001',
@@ -113,38 +79,34 @@ export async function connectAwardWalletAccount(userId, awUserId, db, userEmail)
 }
 
 /**
- * Fetches live loyalty balances for all programs linked via AwardWallet.
- * Returns simulator data when no key / account is configured.
+ * Returns all loyalty balances for a user: manually-entered entries
+ * (wallet.manualBalances — the primary source) merged with any synced
+ * AwardWallet accounts. Demo data is shown only when an AwardWallet
+ * simulator connection exists and the user has no manual entries yet.
  *
  * @param {string} userId - Firestore user ID
  * @param {object} db - Firestore Admin DB instance
  */
-export async function getAwardWalletBalances(userId, db, userEmail) {
-  const awRef = await _loadAWRef(db, userId);
-  const isOwner = userEmail === OWNER_EMAIL;
+export async function getAwardWalletBalances(userId, db) {
+  const wallet = await loadWallet(db, userId);
+  const manual = (wallet?.manualBalances || []).map(withStaleness);
+  const awRef  = wallet?.awardwallet;
 
-  // Resolve which simulator dataset to use based on the requesting user
-  const simulatorBalances = isOwner ? OWNER_LOYALTY_BALANCES : DEMO_LOYALTY_BALANCES;
-
-  if (!awRef || AW_SIMULATOR_MODE()) {
-    console.log(`[AwardWallet Simulator] Returning ${isOwner ? 'owner' : 'demo'} balances for ${userEmail || userId}`);
-    return simulatorBalances;
+  let synced = [];
+  if (awRef && !awRef.simulatorMode && !AW_SIMULATOR_MODE()) {
+    try {
+      const accounts = await _fetchAWBalances(awRef.awUserId);
+      synced = accounts.map(a => ({ ...a, source: 'awardwallet' }));
+    } catch (err) {
+      // Degrade to manual entries only rather than failing the whole request
+      console.error('[AwardWallet] Balance fetch failed:', err.message);
+    }
+  } else if (awRef && manual.length === 0) {
+    console.log(`[AwardWallet Simulator] Returning demo balances for ${userId}`);
+    synced = DEMO_LOYALTY_BALANCES.map(a => ({ ...a, source: 'demo' }));
   }
 
-  if (awRef.simulatorMode) {
-    // Check if the stored session's email matches — prevents cross-user data leak
-    const sessionEmail = awRef.userEmail;
-    const sessionIsOwner = sessionEmail === OWNER_EMAIL;
-    return sessionIsOwner ? OWNER_LOYALTY_BALANCES : DEMO_LOYALTY_BALANCES;
-  }
-
-  try {
-    const accounts = await _fetchAWBalances(awRef.awUserId);
-    return accounts;
-  } catch (err) {
-    console.error('[AwardWallet] Balance fetch failed:', err.message);
-    return MOCK_LOYALTY_BALANCES.map(m => ({ ...m, stale: true }));
-  }
+  return [...manual, ...synced];
 }
 
 /**
@@ -157,13 +119,22 @@ export async function disconnectAwardWallet(userId, db) {
 
 /**
  * Computes how many miles a user would need for a given deal
- * and whether their balance covers it, using a simple cents-per-mile valuation.
+ * and whether their balances cover it.
+ *
+ * When live award pricing is available (seats.aero / Gemini), the matching
+ * program uses the actual per-passenger award cost; all other programs fall
+ * back to a cents-per-mile estimate from the cash price.
  *
  * @param {number} cashPrice - total cash price of the deal (all passengers)
  * @param {Array}  loyaltyBalances - array from getAwardWalletBalances()
- * @param {object} loyaltyPrograms - parsed loyalty_programs.json
+ * @param {object} loyaltyPrograms - program catalog with valuations
+ * @param {object} [options]
+ * @param {object} [options.liveAward] - extractAwardPricing() result: { program_id, miles_per_passenger, taxes_usd_per_passenger, date, source }
+ * @param {number} [options.passengers=1] - travelers to price the award for
  */
-export function computeAwardAffordability(cashPrice, loyaltyBalances, loyaltyPrograms) {
+export function computeAwardAffordability(cashPrice, loyaltyBalances, loyaltyPrograms, options = {}) {
+  const { liveAward = null, passengers = 1 } = options;
+
   // Group accounts by program so family balances are evaluated both individually and combined
   const programGroups = {};
   for (const acct of loyaltyBalances) {
@@ -173,9 +144,13 @@ export function computeAwardAffordability(cashPrice, loyaltyBalances, loyaltyPro
   }
 
   return Object.values(programGroups).map(group => {
-    const programData    = loyaltyPrograms[group.program_id] || {};
-    const valueCents     = programData.valuation_cents_per_mile || 1.2;
-    const milesNeeded    = Math.ceil((cashPrice * 100) / valueCents);
+    const programData = loyaltyPrograms[group.program_id] || {};
+    const valueCents  = programData.valuation_cents_per_mile || 1.2;
+
+    const isLive = !!(liveAward && liveAward.program_id === group.program_id && liveAward.miles_per_passenger);
+    const milesNeeded = isLive
+      ? Math.ceil(liveAward.miles_per_passenger * passengers)
+      : Math.ceil((cashPrice * 100) / valueCents);
     const combinedBalance = group.accounts.reduce((s, a) => s + a.balance, 0);
     const canAffordCombined = combinedBalance >= milesNeeded;
 
@@ -196,6 +171,9 @@ export function computeAwardAffordability(cashPrice, loyaltyBalances, loyaltyPro
       total_value_usd:   ((combinedBalance * valueCents) / 100).toFixed(2),
       member_breakdown:  memberBreakdown,
       account_count:     group.accounts.length,
+      pricing_source:    isLive ? (liveAward.source || 'live_award') : 'estimate',
+      taxes_usd:         isLive ? +((liveAward.taxes_usd_per_passenger || 0) * passengers).toFixed(2) : null,
+      award_date:        isLive ? liveAward.date || null : null,
     };
   });
 }
@@ -243,15 +221,6 @@ async function _saveAWRef(db, userId, awData) {
     );
   } catch (_) {
     console.warn('[AwardWallet] Firestore unavailable — reference not persisted.');
-  }
-}
-
-async function _loadAWRef(db, userId) {
-  try {
-    const doc = await db.collection('profiles').doc(userId).get();
-    return doc.exists ? doc.data()?.wallet?.awardwallet : null;
-  } catch (_) {
-    return null;
   }
 }
 

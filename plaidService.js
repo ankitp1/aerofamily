@@ -196,16 +196,20 @@ export async function getPlaidBalances(userId, db) {
     const resp     = await getClient().accountsBalanceGet({ access_token: accessToken });
     const accounts = resp.data.accounts;
 
+    // Plaid only exposes dollar balances — rewards/points balances are NOT
+    // available through its API. For credit cards, `current` is the statement
+    // balance owed, so these entries must never be presented as points.
     return accounts.map(acc => ({
-      account_id:   acc.account_id,
-      name:         acc.name,
-      type:         acc.type,
-      subtype:      acc.subtype,
-      program:      _inferProgram(acc),
-      balance:      acc.balances?.available ?? acc.balances?.current ?? 0,
-      balanceLabel: 'points',
-      institution:  walletData.institution || 'Bank',
-      lastSyncedAt: new Date().toISOString(),
+      account_id:         acc.account_id,
+      name:               acc.name,
+      type:               acc.type,
+      subtype:            acc.subtype,
+      program:            _inferProgram(acc),
+      balance:            acc.balances?.current ?? 0,
+      balanceLabel:       'USD',
+      rewardsUnavailable: true,
+      institution:        walletData.institution || 'Bank',
+      lastSyncedAt:       new Date().toISOString(),
     }));
   } catch (err) {
     console.error('[Plaid] Balance fetch failed:', err.message);
